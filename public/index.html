@@ -1,831 +1,505 @@
 <!doctype html>
 <html lang="zh">
-    <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>UNO | Copyright (C) 2026 miruku (lovemilk)</title>
-        <link rel="stylesheet" href="style.css" />
-    </head>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UNO | Copyright (C) 2026 miruku (lovemilk)</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
 
-    <body>
-        <h1>UNO</h1>
-        <div id="lobby">
-            <h2>加入 UNO Game</h2>
-            <div>
-                <input
-                    type="text"
-                    id="name"
-                    placeholder="玩家名称"
-                    autocomplete="off"
-                    spellcheck="false"
-                    autocapitalize="off"
-                />
-            </div>
-            <div>
-                <input
-                    type="text"
-                    id="lobby-id"
-                    placeholder="大厅名称"
-                    autocomplete="off"
-                    spellcheck="false"
-                    autocapitalize="off"
-                />
-            </div>
-            <button id="join" title="键盘快捷键：Enter">加入 (创建)</button>
-            <div id="lobby-info" style="display: none">
-                <h3>大厅: <span id="current-lobby-id"></span></h3>
-                <p>分享大厅 ID 即可加入!</p>
-            </div>
-            <div
-                id="draw-mode-area"
-                style="
-                    display: none;
-                    margin-top: 12px;
-                    align-items: center;
-                    justify-content: center;
-                    gap: 8px;
-                "
-            >
-                <div class="mode-toggle" id="draw-mode-toggle-box">
-                    <span class="mode-option mode-left" data-mode="direct"
-                        >直接加牌</span
-                    >
-                    <span
-                        class="mode-option mode-right active"
-                        data-mode="chain"
-                        >链式加牌</span
-                    >
-                </div>
-                <span
-                    id="draw-mode-info"
-                    style="cursor: pointer; color: #667eea; font-size: 0.85rem"
-                    tabindex="0"
-                    data-tooltip="点击查看完整加牌规则&#10;链式加牌：+2/+4 可叠加，受害者可接加牌反击&#10;直接加牌：+2/+4 直接让下家抽牌，不叠加"
-                    >ⓘ</span
-                >
-            </div>
-            <ul id="players"></ul>
-            <button id="invite-ai" style="display: none" title="键盘快捷键：I">
-                邀请 AI
-            </button>
-            <button
-                id="ready"
-                style="display: none"
-                title="键盘快捷键：Enter 或 R"
-            >
-                准备
-            </button>
+  <body>
+    <h1>UNO</h1>
+    <div id="lobby">
+      <h2>加入 UNO Game</h2>
+      <div>
+        <input
+          type="text"
+          id="name"
+          placeholder="玩家名称"
+          autocomplete="off"
+          spellcheck="false"
+          autocapitalize="off"
+        />
+      </div>
+      <div>
+        <input
+          type="text"
+          id="lobby-id"
+          placeholder="大厅名称"
+          autocomplete="off"
+          spellcheck="false"
+          autocapitalize="off"
+        />
+      </div>
+      <button id="join" title="键盘快捷键：Enter">加入 (创建)</button>
+      <div id="lobby-info" style="display: none">
+        <h3>大厅: <span id="current-lobby-id"></span></h3>
+        <p>分享大厅 ID 即可加入!</p>
+      </div>
+      <div
+        id="draw-mode-area"
+        style="
+          display: none;
+          margin-top: 12px;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+        "
+      >
+        <div class="mode-toggle" id="draw-mode-toggle-box">
+          <span class="mode-option mode-left" data-mode="direct">直接加牌</span>
+          <span class="mode-option mode-right active" data-mode="chain">链式加牌</span>
         </div>
-        <div id="game" style="display: none">
-            <div id="turn-indicator">
-                <h3 id="turn-text">
-                    <span id="turn-label">等待游戏开始...</span>
-                </h3>
-            </div>
-            <div id="opponent-hands"></div>
-            <!-- In-game status strip: shows the active draw mode and any
+        <span
+          id="draw-mode-info"
+          style="cursor: pointer; color: #667eea; font-size: 0.85rem"
+          tabindex="0"
+          data-tooltip="点击查看完整加牌规则&#10;链式加牌：+2/+4 可叠加，受害者可接加牌反击&#10;直接加牌：+2/+4 直接让下家抽牌，不叠加"
+          >ⓘ</span
+        >
+      </div>
+      <ul id="players"></ul>
+      <button id="invite-ai" style="display: none" title="键盘快捷键：I">邀请 AI</button>
+      <button id="ready" style="display: none" title="键盘快捷键：Enter 或 R">准备</button>
+    </div>
+    <div id="game" style="display: none">
+      <div id="turn-indicator">
+        <h3 id="turn-text">
+          <span id="turn-label">等待游戏开始...</span>
+        </h3>
+      </div>
+      <div id="opponent-hands"></div>
+      <!-- In-game status strip: shows the active draw mode and any
              pending chain count. Lives between opponent-hands and the
              center action area so it sits in the natural eye-path
              above the discard pile. -->
-            <div id="game-status">
-                <span
-                    id="game-status-mode"
-                    class="game-status-pill"
-                    data-tooltip="加牌模式（房主在大厅设置）"
-                ></span>
-                <span
-                    id="game-status-chain"
-                    class="game-status-pill chain hidden"
-                    data-tooltip="当前累计的链式加牌张数；下一位玩家必须接 +2/+4 或被迫抽牌"
-                ></span>
-            </div>
-            <div id="center-area">
-                <div id="action-buttons">
-                    <button id="draw-card" title="键盘快捷键：D 或 Space">
-                        抽牌
-                    </button>
-                    <button id="surrender-btn" title="键盘快捷键：S">
-                        认输
-                    </button>
-                    <button
-                        id="leave-spectate-btn"
-                        style="display: none"
-                        title="键盘快捷键：L"
-                    >
-                        退出观战
-                    </button>
-                </div>
-                <div id="discard-pile"></div>
-                <div id="wild-color-picker" style="display: none">
-                    <h4>
-                        选择颜色:
-                        <small
-                            style="
-                                font-size: 0.75rem;
-                                color: #a0aec0;
-                                font-weight: 400;
-                            "
-                            >(键盘：1红 2黄 3绿 4蓝 / ←→ 切换 / Enter 确认 / Esc
-                            取消)</small
-                        >
-                    </h4>
-                    <div id="color-options">
-                        <div
-                            class="color-option"
-                            data-color="red"
-                            data-key="1"
-                            style="background-color: #f35b53"
-                        ></div>
-                        <div
-                            class="color-option"
-                            data-color="yellow"
-                            data-key="2"
-                            style="background-color: #f2b010"
-                        ></div>
-                        <div
-                            class="color-option"
-                            data-color="green"
-                            data-key="3"
-                            style="background-color: #2abd68"
-                        ></div>
-                        <div
-                            class="color-option"
-                            data-color="blue"
-                            data-key="4"
-                            style="background-color: #41b2cf"
-                        ></div>
-                    </div>
-                    <button id="cancel-wild-btn">取消</button>
-                </div>
-            </div>
-            <div id="reaction-bar">
-                <div id="reaction-emojis">
-                    <button class="reaction-emoji" data-emoji="😂">
-                        <img
-                            src="/icons/laugh.svg"
-                            width="24"
-                            height="24"
-                            alt="😂"
-                        />
-                    </button>
-                    <button class="reaction-emoji" data-emoji="😡">
-                        <img
-                            src="/icons/angry.svg"
-                            width="24"
-                            height="24"
-                            alt="😡"
-                        />
-                    </button>
-                    <button class="reaction-emoji" data-emoji="😱">
-                        <img
-                            src="/icons/shock.svg"
-                            width="24"
-                            height="24"
-                            alt="😱"
-                        />
-                    </button>
-                    <button class="reaction-emoji" data-emoji="👍">
-                        <img
-                            src="/icons/like.svg"
-                            width="24"
-                            height="24"
-                            alt="👍"
-                        />
-                    </button>
-                    <button class="reaction-emoji" data-emoji="👎">
-                        <img
-                            src="/icons/dislike.svg"
-                            width="24"
-                            height="24"
-                            alt="👎"
-                        />
-                    </button>
-                    <button class="reaction-emoji" data-emoji="🎉">
-                        <img
-                            src="/icons/party.svg"
-                            width="24"
-                            height="24"
-                            alt="🎉"
-                        />
-                    </button>
-                    <button class="reaction-emoji" data-emoji="😭">
-                        <img
-                            src="/icons/cry.svg"
-                            width="24"
-                            height="24"
-                            alt="😭"
-                        />
-                    </button>
-                    <button class="reaction-emoji" data-emoji="🔥">
-                        <img
-                            src="/icons/fire.svg"
-                            width="24"
-                            height="24"
-                            alt="🔥"
-                        />
-                    </button>
-                </div>
-                <div id="reaction-text-area">
-                    <input
-                        type="text"
-                        id="reaction-text-input"
-                        maxlength="200"
-                        placeholder="发送消息..."
-                    />
-                    <button id="reaction-send-btn">发送</button>
-                </div>
-                <!-- Persistent message history. The floating popups over
+      <div id="game-status">
+        <span
+          id="game-status-mode"
+          class="game-status-pill"
+          data-tooltip="加牌模式（房主在大厅设置）"
+        ></span>
+        <span
+          id="game-status-chain"
+          class="game-status-pill chain hidden"
+          data-tooltip="当前累计的链式加牌张数；下一位玩家必须接 +2/+4 或被迫抽牌"
+        ></span>
+      </div>
+      <div id="center-area">
+        <div id="action-buttons">
+          <button id="draw-card" title="键盘快捷键：D 或 Space">抽牌</button>
+          <button id="surrender-btn" title="键盘快捷键：S">认输</button>
+          <button id="leave-spectate-btn" style="display: none" title="键盘快捷键：L">
+            退出观战
+          </button>
+        </div>
+        <div id="discard-pile"></div>
+        <div id="wild-color-picker" style="display: none">
+          <h4>
+            选择颜色:
+            <small style="font-size: 0.75rem; color: #a0aec0; font-weight: 400"
+              >(键盘：1红 2黄 3绿 4蓝 / ←→ 切换 / Enter 确认 / Esc 取消)</small
+            >
+          </h4>
+          <div id="color-options">
+            <div
+              class="color-option"
+              data-color="red"
+              data-key="1"
+              style="background-color: #f35b53"
+            ></div>
+            <div
+              class="color-option"
+              data-color="yellow"
+              data-key="2"
+              style="background-color: #f2b010"
+            ></div>
+            <div
+              class="color-option"
+              data-color="green"
+              data-key="3"
+              style="background-color: #2abd68"
+            ></div>
+            <div
+              class="color-option"
+              data-color="blue"
+              data-key="4"
+              style="background-color: #41b2cf"
+            ></div>
+          </div>
+          <button id="cancel-wild-btn">取消</button>
+        </div>
+      </div>
+      <div id="reaction-bar">
+        <div id="reaction-emojis">
+          <button class="reaction-emoji" data-emoji="😂">
+            <img src="/icons/laugh.svg" width="24" height="24" alt="😂" />
+          </button>
+          <button class="reaction-emoji" data-emoji="😡">
+            <img src="/icons/angry.svg" width="24" height="24" alt="😡" />
+          </button>
+          <button class="reaction-emoji" data-emoji="😱">
+            <img src="/icons/shock.svg" width="24" height="24" alt="😱" />
+          </button>
+          <button class="reaction-emoji" data-emoji="👍">
+            <img src="/icons/like.svg" width="24" height="24" alt="👍" />
+          </button>
+          <button class="reaction-emoji" data-emoji="👎">
+            <img src="/icons/dislike.svg" width="24" height="24" alt="👎" />
+          </button>
+          <button class="reaction-emoji" data-emoji="🎉">
+            <img src="/icons/party.svg" width="24" height="24" alt="🎉" />
+          </button>
+          <button class="reaction-emoji" data-emoji="😭">
+            <img src="/icons/cry.svg" width="24" height="24" alt="😭" />
+          </button>
+          <button class="reaction-emoji" data-emoji="🔥">
+            <img src="/icons/fire.svg" width="24" height="24" alt="🔥" />
+          </button>
+        </div>
+        <div id="reaction-text-area">
+          <input type="text" id="reaction-text-input" maxlength="200" placeholder="发送消息..." />
+          <button id="reaction-send-btn">发送</button>
+        </div>
+        <!-- Persistent message history. The floating popups over
                  player tiles vanish after a few seconds; this list
                  keeps the last ~30 messages so users who scroll back
                  can catch up on chat they missed. Populated by client.ts
                  inside showReaction(). -->
-                <div id="reaction-history" aria-live="polite"></div>
-            </div>
-            <div id="player-hand-area">
-                <div id="card-controls">
-                    <button id="card-layout-toggle" title="键盘快捷键：T">
-                        切换到滚动排列
-                    </button>
-                </div>
-                <div id="player-hand"></div>
-            </div>
+        <div id="reaction-history" aria-live="polite"></div>
+      </div>
+      <div id="player-hand-area">
+        <div id="card-controls">
+          <button id="card-layout-toggle" title="键盘快捷键：T">切换到滚动排列</button>
         </div>
-        <div id="modal-overlay" class="hidden">
-            <div id="modal-box">
-                <p id="modal-message" class="user-select"></p>
-                <div id="modal-actions">
-                    <button id="modal-cancel-btn" class="modal-btn">
-                        取消
-                    </button>
-                    <button
-                        id="modal-ok-btn"
-                        class="modal-btn modal-btn-primary"
-                    >
-                        确定
-                    </button>
-                </div>
-            </div>
+        <div id="player-hand"></div>
+      </div>
+    </div>
+    <div id="modal-overlay" class="hidden">
+      <div id="modal-box">
+        <p id="modal-message" class="user-select"></p>
+        <div id="modal-actions">
+          <button id="modal-cancel-btn" class="modal-btn">取消</button>
+          <button id="modal-ok-btn" class="modal-btn modal-btn-primary">确定</button>
         </div>
-        <div id="game-over-overlay" class="hidden">
-            <div id="game-over-content">
-                <div id="game-over-icon"></div>
-                <h2 id="game-over-title"></h2>
-                <p id="game-over-message"></p>
-                <button id="game-over-btn">返回大厅</button>
-            </div>
-        </div>
-        <div id="dev-panel">
-            <div id="dev-panel-header">
-                DEV <span id="dev-panel-toggle">▼</span>
-            </div>
-            <div id="dev-panel-body">
-                <!-- Live state info panel. Pinned at the top of the dev
+      </div>
+    </div>
+    <div id="game-over-overlay" class="hidden">
+      <div id="game-over-content">
+        <div id="game-over-icon"></div>
+        <h2 id="game-over-title"></h2>
+        <p id="game-over-message"></p>
+        <button id="game-over-btn">返回大厅</button>
+      </div>
+    </div>
+    <div id="dev-panel">
+      <div id="dev-panel-header">DEV <span id="dev-panel-toggle">▼</span></div>
+      <div id="dev-panel-body">
+        <!-- Live state info panel. Pinned at the top of the dev
                  panel so the dev / debugger can see lobby-and-game
                  state at a glance without scrolling past all the
                  mutation buttons first. -->
-                <div id="dev-state-info" aria-live="polite"></div>
-                <button
-                    class="dev-btn"
-                    data-action="dev_add_cards"
-                    data-count="1"
-                >
-                    +1 牌
-                </button>
-                <button
-                    class="dev-btn"
-                    data-action="dev_add_cards"
-                    data-count="5"
-                >
-                    +5 牌
-                </button>
-                <button class="dev-btn" data-action="dev_add_all_cards">
-                    全部牌
-                </button>
-                <button
-                    class="dev-btn"
-                    data-action="dev_remove_cards"
-                    data-count="1"
-                >
-                    -1 牌
-                </button>
-                <button
-                    class="dev-btn"
-                    data-action="dev_remove_cards"
-                    data-count="5"
-                >
-                    -5 牌
-                </button>
-                <button class="dev-btn" data-action="dev_clear_hand">
-                    清空手牌
-                </button>
-                <button class="dev-btn" data-action="dev_skip">跳回合</button>
-                <button
-                    class="dev-btn"
-                    data-action="dev_set_chain"
-                    data-count="2"
-                >
-                    链 +2
-                </button>
-                <button
-                    class="dev-btn"
-                    data-action="dev_set_chain"
-                    data-count="6"
-                >
-                    链 +6
-                </button>
-                <button
-                    class="dev-btn"
-                    data-action="dev_set_chain"
-                    data-count="0"
-                >
-                    清链
-                </button>
-                <button
-                    class="dev-btn"
-                    data-action="dev_toggle_turn_timer"
-                    id="dev-toggle-timer-btn"
-                >
-                    暂停计时
-                </button>
-                <button
-                    class="dev-btn"
-                    id="dev-disconnect-btn"
-                    data-action="dev_disconnect"
-                >
-                    断开
-                </button>
-                <button class="dev-btn" data-action="dev_export_state">
-                    导出状态
-                </button>
-                <button class="dev-btn call-win-btn" data-action="dev_call_win">
-                    🏆 胜利
-                </button>
-            </div>
-        </div>
-        <div
-            id="about-overlay"
-            class="hidden"
-            style="
-                position: fixed;
-                inset: 0;
-                background: rgba(0, 0, 0, 0.85);
-                align-items: center;
-                justify-content: center;
-                z-index: 2000;
-            "
+        <div id="dev-state-info" aria-live="polite"></div>
+        <button class="dev-btn" data-action="dev_add_cards" data-count="1">+1 牌</button>
+        <button class="dev-btn" data-action="dev_add_cards" data-count="5">+5 牌</button>
+        <button class="dev-btn" data-action="dev_add_all_cards">全部牌</button>
+        <button class="dev-btn" data-action="dev_remove_cards" data-count="1">-1 牌</button>
+        <button class="dev-btn" data-action="dev_remove_cards" data-count="5">-5 牌</button>
+        <button class="dev-btn" data-action="dev_clear_hand">清空手牌</button>
+        <button class="dev-btn" data-action="dev_skip">跳回合</button>
+        <button class="dev-btn" data-action="dev_set_chain" data-count="2">链 +2</button>
+        <button class="dev-btn" data-action="dev_set_chain" data-count="6">链 +6</button>
+        <button class="dev-btn" data-action="dev_set_chain" data-count="0">清链</button>
+        <button class="dev-btn" data-action="dev_toggle_turn_timer" id="dev-toggle-timer-btn">
+          暂停计时
+        </button>
+        <button class="dev-btn" id="dev-disconnect-btn" data-action="dev_disconnect">断开</button>
+        <button class="dev-btn" data-action="dev_export_state">导出状态</button>
+        <button class="dev-btn call-win-btn" data-action="dev_call_win">🏆 胜利</button>
+      </div>
+    </div>
+    <div
+      id="about-overlay"
+      class="hidden"
+      style="
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.85);
+        align-items: center;
+        justify-content: center;
+        z-index: 2000;
+      "
+    >
+      <div
+        id="about-box"
+        class="user-select-children"
+        style="
+          background: #1e1e1e;
+          border: 1px solid #374151;
+          border-radius: 20px;
+          padding: 32px 40px;
+          max-width: 460px;
+          width: 90%;
+          color: #e0e0e0;
+          line-height: 1.8;
+          animation: modalIn 0.2s ease;
+        "
+      >
+        <h2 style="color: #fff; text-align: center; margin-bottom: 16px">关于</h2>
+        <h3 style="color: #667eea; margin: 16px 0 6px; font-size: 1rem">技术栈</h3>
+        <p style="margin: 2px 0; font-size: 0.85rem; color: #a0aec0">TypeScript - Apache-2.0</p>
+        <p style="margin: 2px 0; font-size: 0.85rem; color: #a0aec0">ws (WebSocket) - MIT</p>
+        <p style="margin: 2px 0; font-size: 0.85rem; color: #a0aec0">pkg - MIT</p>
+        <p style="margin: 2px 0; font-size: 0.85rem; color: #a0aec0">Blobmoji SVG - MIT</p>
+        <p style="margin: 2px 0; font-size: 0.85rem; color: #a0aec0">Vitest - MIT</p>
+        <p style="margin: 2px 0; font-size: 0.85rem; color: #a0aec0">Playwright - Apache-2.0</p>
+        <h3 style="color: #667eea; margin: 16px 0 6px; font-size: 1rem">许可证</h3>
+        <p style="margin: 2px 0; font-size: 0.85rem">
+          <a
+            style="color: #667eea"
+            href="https://opensource.org/license/bsd-3-clause"
+            target="_blank"
+            >BSD 3-Clause License</a
+          >
+        </p>
+        <p style="margin: 2px 0; font-size: 0.85rem; color: #a0aec0">
+          Copyright &copy; 2026 miruku (lovemilk)
+        </p>
+        <p style="margin: 2px 0; font-size: 0.85rem">
+          <a
+            style="color: #667eea"
+            href="https://aka.lovemilk.top/github/uno-game-zhs"
+            target="_blank"
+            >GitHub Repo</a
+          >
+        </p>
+        <h3 id="about-storage-title" style="color: #667eea; margin: 16px 0 6px; font-size: 1rem">
+          存储
+        </h3>
+        <button
+          id="about-clear-btn"
+          style="
+            width: 100%;
+            padding: 10px;
+            border: none;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+            color: #fff;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            font-family: inherit;
+            margin-bottom: 8px;
+          "
         >
-            <div
-                id="about-box"
-                class="user-select-children"
-                style="
-                    background: #1e1e1e;
-                    border: 1px solid #374151;
-                    border-radius: 20px;
-                    padding: 32px 40px;
-                    max-width: 460px;
-                    width: 90%;
-                    color: #e0e0e0;
-                    line-height: 1.8;
-                    animation: modalIn 0.2s ease;
-                "
-            >
-                <h2
-                    style="color: #fff; text-align: center; margin-bottom: 16px"
-                >
-                    关于
-                </h2>
-                <h3 style="color: #667eea; margin: 16px 0 6px; font-size: 1rem">
-                    技术栈
-                </h3>
-                <p style="margin: 2px 0; font-size: 0.85rem; color: #a0aec0">
-                    TypeScript - Apache-2.0
-                </p>
-                <p style="margin: 2px 0; font-size: 0.85rem; color: #a0aec0">
-                    ws (WebSocket) - MIT
-                </p>
-                <p style="margin: 2px 0; font-size: 0.85rem; color: #a0aec0">
-                    pkg - MIT
-                </p>
-                <p style="margin: 2px 0; font-size: 0.85rem; color: #a0aec0">
-                    Blobmoji SVG - MIT
-                </p>
-                <p style="margin: 2px 0; font-size: 0.85rem; color: #a0aec0">
-                    Vitest - MIT
-                </p>
-                <p style="margin: 2px 0; font-size: 0.85rem; color: #a0aec0">
-                    Playwright - Apache-2.0
-                </p>
-                <h3 style="color: #667eea; margin: 16px 0 6px; font-size: 1rem">
-                    许可证
-                </h3>
-                <p style="margin: 2px 0; font-size: 0.85rem">
-                    <a
-                        style="color: #667eea"
-                        href="https://opensource.org/license/bsd-3-clause"
-                        target="_blank"
-                        >BSD 3-Clause License</a
-                    >
-                </p>
-                <p style="margin: 2px 0; font-size: 0.85rem; color: #a0aec0">
-                    Copyright &copy; 2026 miruku (lovemilk)
-                </p>
-                <p style="margin: 2px 0; font-size: 0.85rem">
-                    <a
-                        style="color: #667eea"
-                        href="https://aka.lovemilk.top/github/uno-game-zhs"
-                        target="_blank"
-                        >GitHub Repo</a
-                    >
-                </p>
-                <h3
-                    id="about-storage-title"
-                    style="color: #667eea; margin: 16px 0 6px; font-size: 1rem"
-                >
-                    存储
-                </h3>
-                <button
-                    id="about-clear-btn"
-                    style="
-                        width: 100%;
-                        padding: 10px;
-                        border: none;
-                        border-radius: 10px;
-                        background: linear-gradient(135deg, #ff6b6b, #ee5a24);
-                        color: #fff;
-                        font-size: 0.85rem;
-                        font-weight: 600;
-                        cursor: pointer;
-                        font-family: inherit;
-                        margin-bottom: 8px;
-                    "
-                >
-                    清除本地存储状态
-                </button>
-                <p
-                    id="about-clear-msg"
-                    style="
-                        color: #48bb78;
-                        text-align: center;
-                        font-size: 0.8rem;
-                        display: none;
-                        margin: 0;
-                    "
-                >
-                    已清除
-                </p>
-                <button
-                    id="about-close-btn"
-                    style="
-                        width: 100%;
-                        padding: 10px;
-                        margin-top: 16px;
-                        border: 1px solid #374151;
-                        border-radius: 10px;
-                        background: transparent;
-                        color: #a0aec0;
-                        font-size: 0.85rem;
-                        cursor: pointer;
-                        font-family: inherit;
-                    "
-                >
-                    关闭
-                </button>
-            </div>
-        </div>
-        <div
-            id="rules-overlay"
-            class="hidden"
-            style="
-                position: fixed;
-                inset: 0;
-                background: rgba(0, 0, 0, 0.85);
-                align-items: flex-start;
-                justify-content: center;
-                z-index: 2000;
-                overflow-y: auto;
-                padding: 40px 20px;
-            "
+          清除本地存储状态
+        </button>
+        <p
+          id="about-clear-msg"
+          style="color: #48bb78; text-align: center; font-size: 0.8rem; display: none; margin: 0"
         >
-            <div
-                id="rules-box"
-                class="user-select-children"
-                style="
-                    background: #1e1e1e;
-                    border: 1px solid #374151;
-                    border-radius: 20px;
-                    padding: 32px 40px;
-                    max-width: 600px;
-                    width: 90%;
-                    color: #e0e0e0;
-                    line-height: 1.8;
-                    animation: modalIn 0.2s ease;
-                "
-            >
-                <h2
-                    style="color: #fff; text-align: center; margin-bottom: 16px"
-                >
-                    UNO 规则
-                </h2>
+          已清除
+        </p>
+        <button
+          id="about-close-btn"
+          style="
+            width: 100%;
+            padding: 10px;
+            margin-top: 16px;
+            border: 1px solid #374151;
+            border-radius: 10px;
+            background: transparent;
+            color: #a0aec0;
+            font-size: 0.85rem;
+            cursor: pointer;
+            font-family: inherit;
+          "
+        >
+          关闭
+        </button>
+      </div>
+    </div>
+    <div
+      id="rules-overlay"
+      class="hidden"
+      style="
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.85);
+        align-items: flex-start;
+        justify-content: center;
+        z-index: 2000;
+        overflow-y: auto;
+        padding: 40px 20px;
+      "
+    >
+      <div
+        id="rules-box"
+        class="user-select-children"
+        style="
+          background: #1e1e1e;
+          border: 1px solid #374151;
+          border-radius: 20px;
+          padding: 32px 40px;
+          max-width: 600px;
+          width: 90%;
+          color: #e0e0e0;
+          line-height: 1.8;
+          animation: modalIn 0.2s ease;
+        "
+      >
+        <h2 style="color: #fff; text-align: center; margin-bottom: 16px">UNO 规则</h2>
 
-                <h3 style="color: #667eea; margin: 20px 0 8px; font-size: 1rem">
-                    目标
-                </h3>
-                <p style="font-size: 0.85rem; color: #a0aec0">
-                    最先出完手牌的玩家获胜。
-                </p>
+        <h3 style="color: #667eea; margin: 20px 0 8px; font-size: 1rem">目标</h3>
+        <p style="font-size: 0.85rem; color: #a0aec0">最先出完手牌的玩家获胜。</p>
 
-                <h3 style="color: #667eea; margin: 20px 0 8px; font-size: 1rem">
-                    牌面
-                </h3>
-                <div
-                    style="
-                        display: flex;
-                        flex-wrap: wrap;
-                        gap: 8px;
-                        font-size: 0.8rem;
-                        color: #a0aec0;
-                        margin-bottom: 8px;
-                    "
-                >
-                    <span
-                        style="
-                            background: #e74c3c;
-                            color: #fff;
-                            padding: 2px 8px;
-                            border-radius: 4px;
-                        "
-                        >红</span
-                    >
-                    <span
-                        style="
-                            background: #3498db;
-                            color: #fff;
-                            padding: 2px 8px;
-                            border-radius: 4px;
-                        "
-                        >蓝</span
-                    >
-                    <span
-                        style="
-                            background: #27ae60;
-                            color: #fff;
-                            padding: 2px 8px;
-                            border-radius: 4px;
-                        "
-                        >绿</span
-                    >
-                    <span
-                        style="
-                            background: #f39c12;
-                            color: #fff;
-                            padding: 2px 8px;
-                            border-radius: 4px;
-                        "
-                        >黄</span
-                    >
-                    <span>—</span>
-                    <span
-                        style="
-                            background: #2c3e50;
-                            color: #fff;
-                            padding: 2px 8px;
-                            border-radius: 4px;
-                        "
-                        >黑★</span
-                    >
-                </div>
-                <table
-                    style="
-                        width: 100%;
-                        font-size: 0.8rem;
-                        color: #a0aec0;
-                        border-collapse: collapse;
-                    "
-                >
-                    <tr>
-                        <td
-                            style="
-                                padding: 4px 8px;
-                                border-bottom: 1px solid #374151;
-                            "
-                        >
-                            数字牌
-                        </td>
-                        <td
-                            style="
-                                padding: 4px 8px;
-                                border-bottom: 1px solid #374151;
-                            "
-                        >
-                            0~9，每个颜色各一张 0、两张 1~9
-                        </td>
-                    </tr>
-                    <tr>
-                        <td
-                            style="
-                                padding: 4px 8px;
-                                border-bottom: 1px solid #374151;
-                            "
-                        >
-                            跳过 Ø
-                        </td>
-                        <td
-                            style="
-                                padding: 4px 8px;
-                                border-bottom: 1px solid #374151;
-                            "
-                        >
-                            跳过下一位玩家
-                        </td>
-                    </tr>
-                    <tr>
-                        <td
-                            style="
-                                padding: 4px 8px;
-                                border-bottom: 1px solid #374151;
-                            "
-                        >
-                            反转 ⇄
-                        </td>
-                        <td
-                            style="
-                                padding: 4px 8px;
-                                border-bottom: 1px solid #374151;
-                            "
-                        >
-                            反转出牌方向
-                        </td>
-                    </tr>
-                    <tr>
-                        <td
-                            style="
-                                padding: 4px 8px;
-                                border-bottom: 1px solid #374151;
-                            "
-                        >
-                            +2
-                        </td>
-                        <td
-                            style="
-                                padding: 4px 8px;
-                                border-bottom: 1px solid #374151;
-                            "
-                        >
-                            下家抽 2 张（可接 +2/+4 叠加）
-                        </td>
-                    </tr>
-                    <tr>
-                        <td
-                            style="
-                                padding: 4px 8px;
-                                border-bottom: 1px solid #374151;
-                            "
-                        >
-                            变色 W
-                        </td>
-                        <td
-                            style="
-                                padding: 4px 8px;
-                                border-bottom: 1px solid #374151;
-                            "
-                        >
-                            任意颜色均可出，出牌人选择下一轮颜色
-                        </td>
-                    </tr>
-                    <tr>
-                        <td
-                            style="
-                                padding: 4px 8px;
-                                border-bottom: 1px solid #374151;
-                            "
-                        >
-                            +4
-                        </td>
-                        <td
-                            style="
-                                padding: 4px 8px;
-                                border-bottom: 1px solid #374151;
-                            "
-                        >
-                            下家抽 4 张并选择颜色（可接 +2/+4 叠加）
-                        </td>
-                    </tr>
-                </table>
-
-                <h3 style="color: #667eea; margin: 20px 0 8px; font-size: 1rem">
-                    出牌规则
-                </h3>
-                <p style="font-size: 0.85rem; color: #a0aec0">
-                    出的牌必须与弃牌堆顶牌<b>颜色相同</b>或<b>类型相同</b>，或是
-                    <b>黑牌（变色/+4）</b>。+2 和 +4 互认为同族（可互接）。
-                </p>
-
-                <div id="rules-draw-mode-highlight">
-                    <h3
-                        id="rules-draw-mode-section"
-                        style="
-                            color: #667eea;
-                            margin: 20px 0 8px;
-                            font-size: 1rem;
-                        "
-                    >
-                        加牌模式
-                    </h3>
-                    <p style="font-size: 0.85rem; color: #a0aec0">
-                        <b>链式加牌</b>（默认）：打出 +2 或 +4
-                        后进入加牌状态，下家可继续打 +2/+4
-                        叠加罚牌。若无法/不愿接，则需抽牌或打非 +n
-                        牌打破链条——打破者抽所有累加的罚牌。
-                    </p>
-                    <p
-                        style="
-                            font-size: 0.85rem;
-                            color: #a0aec0;
-                            margin-top: 4px;
-                        "
-                    >
-                        <b>直接加牌</b>：+2/+4
-                        直接让下家抽对应张数，不叠加、不进入加牌状态。房主可在准备阶段切换此模式。
-                    </p>
-                </div>
-
-                <h3 style="color: #667eea; margin: 20px 0 8px; font-size: 1rem">
-                    认输 · 观战
-                </h3>
-                <p style="font-size: 0.85rem; color: #a0aec0">
-                    2 人局认输 = 对手胜。≥3
-                    人局认输可选择进入观战模式继续观战，或离开房间。
-                </p>
-
-                <h3 style="color: #667eea; margin: 20px 0 8px; font-size: 1rem">
-                    出牌超时
-                </h3>
-                <p style="font-size: 0.85rem; color: #a0aec0">
-                    每个回合的玩家有限定时间内必须出牌或抽牌（默认
-                    <span id="rules-play-timeout">30</span>
-                    秒），超时则系统自动为该玩家抽一张牌并轮到下一位玩家。倒计时显示在回合提示旁。
-                </p>
-
-                <h3 style="color: #667eea; margin: 20px 0 8px; font-size: 1rem">
-                    键盘快捷键
-                </h3>
-                <p style="font-size: 0.85rem; color: #a0aec0">
-                    <b>大厅</b>：在名称/大厅 ID 输入框按 Enter
-                    提交加入；进入大厅后按 <b>Enter</b> 或
-                    <b>R</b> 切换准备（开始游戏）；<b>I</b> 邀请 AI（仅房主）。
-                </p>
-                <p style="font-size: 0.85rem; color: #a0aec0">
-                    <b>对局</b>：按 1~9（或小键盘 1~9）选中第 1 至第 9
-                    张手牌，按 0（或 Numpad0）选中第 10 张，<b>再按 Enter</b> 或
-                    <b>再次按下相同的数字键</b> 出牌；ESC
-                    或点击空白区域取消选择。每张可用手牌右上角会显示对应的数字角标。
-                </p>
-                <p style="font-size: 0.85rem; color: #a0aec0">
-                    <b>D</b> 或 <b>Space</b> 抽牌；<b>S</b> 认输；<b>L</b>
-                    退出观战；<b>T</b> 切换手牌排列方式（扇形/滚动）。
-                </p>
-                <p style="font-size: 0.85rem; color: #a0aec0">
-                    出 wild 等黑牌弹出选色器后，可按 1~4
-                    直接选取（红/黄/绿/蓝），或用 ←→ 切换、Enter 确认、ESC
-                    取消。
-                </p>
-                <p style="font-size: 0.85rem; color: #a0aec0">
-                    <b>弹窗</b>内可按 Tab / 方向键在「确定 / 取消」之间切换，按
-                    Enter 执行所选按钮，<b>ESC</b> 关闭任意弹窗。
-                </p>
-                <p style="font-size: 0.85rem; color: #a0aec0">
-                    任何位置按 <b>?</b> 打开本规则弹窗。
-                </p>
-
-                <button
-                    id="rules-close-btn"
-                    style="
-                        width: 100%;
-                        padding: 10px;
-                        margin-top: 24px;
-                        border: 1px solid #374151;
-                        border-radius: 10px;
-                        background: transparent;
-                        color: #a0aec0;
-                        font-size: 0.85rem;
-                        cursor: pointer;
-                        font-family: inherit;
-                    "
-                >
-                    关闭
-                </button>
-            </div>
+        <h3 style="color: #667eea; margin: 20px 0 8px; font-size: 1rem">牌面</h3>
+        <div
+          style="
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            font-size: 0.8rem;
+            color: #a0aec0;
+            margin-bottom: 8px;
+          "
+        >
+          <span style="background: #e74c3c; color: #fff; padding: 2px 8px; border-radius: 4px"
+            >红</span
+          >
+          <span style="background: #3498db; color: #fff; padding: 2px 8px; border-radius: 4px"
+            >蓝</span
+          >
+          <span style="background: #27ae60; color: #fff; padding: 2px 8px; border-radius: 4px"
+            >绿</span
+          >
+          <span style="background: #f39c12; color: #fff; padding: 2px 8px; border-radius: 4px"
+            >黄</span
+          >
+          <span>—</span>
+          <span style="background: #2c3e50; color: #fff; padding: 2px 8px; border-radius: 4px"
+            >黑★</span
+          >
         </div>
-        <footer class="user-select">
-            Copyright (C) 2026 miruku (lovemilk),
-            <a
-                target="_blank"
-                href="https://opensource.org/license/bsd-3-clause"
-                >BSD 3-Clause License</a
-            >
-            · <a href="#" id="rules-link">规则</a> ·
-            <a href="#" id="about-link">关于</a>
-        </footer>
-        <script src="client.cjs"></script>
-    </body>
+        <table style="width: 100%; font-size: 0.8rem; color: #a0aec0; border-collapse: collapse">
+          <tr>
+            <td style="padding: 4px 8px; border-bottom: 1px solid #374151">数字牌</td>
+            <td style="padding: 4px 8px; border-bottom: 1px solid #374151">
+              0~9，每个颜色各一张 0、两张 1~9
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 4px 8px; border-bottom: 1px solid #374151">跳过 Ø</td>
+            <td style="padding: 4px 8px; border-bottom: 1px solid #374151">跳过下一位玩家</td>
+          </tr>
+          <tr>
+            <td style="padding: 4px 8px; border-bottom: 1px solid #374151">反转 ⇄</td>
+            <td style="padding: 4px 8px; border-bottom: 1px solid #374151">反转出牌方向</td>
+          </tr>
+          <tr>
+            <td style="padding: 4px 8px; border-bottom: 1px solid #374151">+2</td>
+            <td style="padding: 4px 8px; border-bottom: 1px solid #374151">
+              下家抽 2 张（可接 +2/+4 叠加）
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 4px 8px; border-bottom: 1px solid #374151">变色 W</td>
+            <td style="padding: 4px 8px; border-bottom: 1px solid #374151">
+              任意颜色均可出，出牌人选择下一轮颜色
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 4px 8px; border-bottom: 1px solid #374151">+4</td>
+            <td style="padding: 4px 8px; border-bottom: 1px solid #374151">
+              下家抽 4 张并选择颜色（可接 +2/+4 叠加）
+            </td>
+          </tr>
+        </table>
+
+        <h3 style="color: #667eea; margin: 20px 0 8px; font-size: 1rem">出牌规则</h3>
+        <p style="font-size: 0.85rem; color: #a0aec0">
+          出的牌必须与弃牌堆顶牌<b>颜色相同</b>或<b>类型相同</b>，或是
+          <b>黑牌（变色/+4）</b>。+2 和 +4 互认为同族（可互接）。
+        </p>
+
+        <div id="rules-draw-mode-highlight">
+          <h3
+            id="rules-draw-mode-section"
+            style="color: #667eea; margin: 20px 0 8px; font-size: 1rem"
+          >
+            加牌模式
+          </h3>
+          <p style="font-size: 0.85rem; color: #a0aec0">
+            <b>链式加牌</b>（默认）：打出 +2 或 +4 后进入加牌状态，下家可继续打 +2/+4
+            叠加罚牌。若无法/不愿接，则需抽牌或打非 +n 牌打破链条——打破者抽所有累加的罚牌。
+          </p>
+          <p style="font-size: 0.85rem; color: #a0aec0; margin-top: 4px">
+            <b>直接加牌</b>：+2/+4
+            直接让下家抽对应张数，不叠加、不进入加牌状态。房主可在准备阶段切换此模式。
+          </p>
+        </div>
+
+        <h3 style="color: #667eea; margin: 20px 0 8px; font-size: 1rem">认输 · 观战</h3>
+        <p style="font-size: 0.85rem; color: #a0aec0">
+          2 人局认输 = 对手胜。≥3 人局认输可选择进入观战模式继续观战，或离开房间。
+        </p>
+
+        <h3 style="color: #667eea; margin: 20px 0 8px; font-size: 1rem">出牌超时</h3>
+        <p style="font-size: 0.85rem; color: #a0aec0">
+          每个回合的玩家有限定时间内必须出牌或抽牌（默认
+          <span id="rules-play-timeout">30</span>
+          秒），超时则系统自动为该玩家抽一张牌并轮到下一位玩家。倒计时显示在回合提示旁。
+        </p>
+
+        <h3 style="color: #667eea; margin: 20px 0 8px; font-size: 1rem">键盘快捷键</h3>
+        <p style="font-size: 0.85rem; color: #a0aec0">
+          <b>大厅</b>：在名称/大厅 ID 输入框按 Enter 提交加入；进入大厅后按 <b>Enter</b> 或
+          <b>R</b> 切换准备（开始游戏）；<b>I</b> 邀请 AI（仅房主）。
+        </p>
+        <p style="font-size: 0.85rem; color: #a0aec0">
+          <b>对局</b>：按 1~9（或小键盘 1~9）选中第 1 至第 9 张手牌，按 0（或 Numpad0）选中第 10
+          张，<b>再按 Enter</b> 或 <b>再次按下相同的数字键</b> 出牌；ESC
+          或点击空白区域取消选择。每张可用手牌右上角会显示对应的数字角标。
+        </p>
+        <p style="font-size: 0.85rem; color: #a0aec0">
+          <b>D</b> 或 <b>Space</b> 抽牌；<b>S</b> 认输；<b>L</b> 退出观战；<b>T</b>
+          切换手牌排列方式（扇形/滚动）。
+        </p>
+        <p style="font-size: 0.85rem; color: #a0aec0">
+          出 wild 等黑牌弹出选色器后，可按 1~4 直接选取（红/黄/绿/蓝），或用 ←→ 切换、Enter
+          确认、ESC 取消。
+        </p>
+        <p style="font-size: 0.85rem; color: #a0aec0">
+          <b>弹窗</b>内可按 Tab / 方向键在「确定 / 取消」之间切换，按 Enter 执行所选按钮，<b>ESC</b>
+          关闭任意弹窗。
+        </p>
+        <p style="font-size: 0.85rem; color: #a0aec0">任何位置按 <b>?</b> 打开本规则弹窗。</p>
+
+        <button
+          id="rules-close-btn"
+          style="
+            width: 100%;
+            padding: 10px;
+            margin-top: 24px;
+            border: 1px solid #374151;
+            border-radius: 10px;
+            background: transparent;
+            color: #a0aec0;
+            font-size: 0.85rem;
+            cursor: pointer;
+            font-family: inherit;
+          "
+        >
+          关闭
+        </button>
+      </div>
+    </div>
+    <footer class="user-select">
+      Copyright (C) 2026 miruku (lovemilk),
+      <a target="_blank" href="https://opensource.org/license/bsd-3-clause">BSD 3-Clause License</a>
+      · <a href="#" id="rules-link">规则</a> ·
+      <a href="#" id="about-link">关于</a>
+    </footer>
+    <script src="client.cjs"></script>
+  </body>
 </html>

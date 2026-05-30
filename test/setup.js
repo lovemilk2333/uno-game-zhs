@@ -10,14 +10,14 @@ global.WebSocket = class MockWebSocket {
       if (this.onopen) this.onopen();
     }, 0);
   }
-  
+
   send(data) {
     // Mock send implementation
-    console.log('Mock WebSocket send:', data);
+    console.log("Mock WebSocket send:", data);
   }
-  
+
   close() {
     this.readyState = 3; // CLOSED
     if (this.onclose) this.onclose();
   }
-}; 
+};

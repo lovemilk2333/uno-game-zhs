@@ -9,14 +9,10 @@ const BASE = `http://localhost:${PORT}`;
 let serverProcess;
 
 beforeAll(async () => {
-  serverProcess = fork(
-    path.resolve("./dist/server.cjs"),
-    ["--port", String(PORT)],
-    {
-      env: { ...process.env, NODE_ENV: "development" },
-      silent: true,
-    },
-  );
+  serverProcess = fork(path.resolve("./dist/server.cjs"), ["--port", String(PORT)], {
+    env: { ...process.env, NODE_ENV: "development" },
+    silent: true,
+  });
   await new Promise((r) => setTimeout(r, 1500));
 });
 
@@ -168,12 +164,7 @@ describe("Security", () => {
     // GET /__proto__ used to bypass `filename in files` whitelist (because
     // `in` walks the prototype chain) and crash the process via
     // res.setHeader('Content-Type', undefined).
-    for (const k of [
-      "__proto__",
-      "constructor",
-      "toString",
-      "hasOwnProperty",
-    ]) {
+    for (const k of ["__proto__", "constructor", "toString", "hasOwnProperty"]) {
       const resp = await fetch(`${BASE}/${k}`);
       expect(resp.status).toBe(404);
     }
@@ -248,9 +239,7 @@ describe("Security", () => {
   it("rejects lobbyId containing control characters", async () => {
     const c = await trackedWs();
     await c.next();
-    c.ws.send(
-      JSON.stringify({ action: "join", name: "tester", lobbyId: "A\x00B" }),
-    );
+    c.ws.send(JSON.stringify({ action: "join", name: "tester", lobbyId: "A\x00B" }));
     const msg = await c.next();
     expect(msg.action).toBe("error");
     c.close();
@@ -261,13 +250,9 @@ describe("Security", () => {
     const b = await trackedWs();
     await a.next();
     await b.next();
-    a.ws.send(
-      JSON.stringify({ action: "join", name: "AAA", lobbyId: "forge1" }),
-    );
+    a.ws.send(JSON.stringify({ action: "join", name: "AAA", lobbyId: "forge1" }));
     await new Promise((r) => setTimeout(r, 100));
-    b.ws.send(
-      JSON.stringify({ action: "join", name: "BBB", lobbyId: "forge1" }),
-    );
+    b.ws.send(JSON.stringify({ action: "join", name: "BBB", lobbyId: "forge1" }));
     await new Promise((r) => setTimeout(r, 100));
     a.ws.send(JSON.stringify({ action: "ready" }));
     b.ws.send(JSON.stringify({ action: "ready" }));
@@ -295,11 +280,7 @@ describe("Security", () => {
     // current player almost certainly does not hold. If they happen to hold
     // it, fall back to a same-color skip.
     let fake = { color: top.color, type: "draw2" };
-    if (
-      (myStart.hand || []).some(
-        (c) => c.color === fake.color && c.type === fake.type,
-      )
-    ) {
+    if ((myStart.hand || []).some((c) => c.color === fake.color && c.type === fake.type)) {
       fake = { color: top.color, type: "skip" };
     }
 
@@ -331,9 +312,7 @@ describe("Security", () => {
   it("caps the AI count per lobby", async () => {
     const c = await trackedWs();
     await c.next();
-    c.ws.send(
-      JSON.stringify({ action: "join", name: "aispam", lobbyId: "aispam-cap" }),
-    );
+    c.ws.send(JSON.stringify({ action: "join", name: "aispam", lobbyId: "aispam-cap" }));
     await new Promise((r) => setTimeout(r, 150));
     for (let i = 0; i < 20; i++) {
       c.ws.send(JSON.stringify({ action: "add_ai" }));
@@ -363,13 +342,9 @@ describe("Security", () => {
     const b = await trackedWs();
     await a.next();
     await b.next();
-    a.ws.send(
-      JSON.stringify({ action: "join", name: "rA", lobbyId: "reactlim" }),
-    );
+    a.ws.send(JSON.stringify({ action: "join", name: "rA", lobbyId: "reactlim" }));
     await new Promise((r) => setTimeout(r, 100));
-    b.ws.send(
-      JSON.stringify({ action: "join", name: "rB", lobbyId: "reactlim" }),
-    );
+    b.ws.send(JSON.stringify({ action: "join", name: "rB", lobbyId: "reactlim" }));
     await new Promise((r) => setTimeout(r, 100));
     a.ws.send(JSON.stringify({ action: "ready" }));
     b.ws.send(JSON.stringify({ action: "ready" }));
@@ -413,8 +388,7 @@ describe("Security", () => {
     for (let i = 0; i < 5; i++) {
       try {
         const m = await b.next(100);
-        if (m.action === "reaction" && typeof m.content === "object")
-          gotReaction = true;
+        if (m.action === "reaction" && typeof m.content === "object") gotReaction = true;
       } catch {
         break;
       }
@@ -430,13 +404,9 @@ describe("Security", () => {
     const b = await trackedWs();
     await a.next();
     await b.next();
-    a.ws.send(
-      JSON.stringify({ action: "join", name: "sx1", lobbyId: "specval" }),
-    );
+    a.ws.send(JSON.stringify({ action: "join", name: "sx1", lobbyId: "specval" }));
     await new Promise((r) => setTimeout(r, 100));
-    b.ws.send(
-      JSON.stringify({ action: "join", name: "sx2", lobbyId: "specval" }),
-    );
+    b.ws.send(JSON.stringify({ action: "join", name: "sx2", lobbyId: "specval" }));
     await new Promise((r) => setTimeout(r, 100));
     a.ws.send(JSON.stringify({ action: "ready" }));
     b.ws.send(JSON.stringify({ action: "ready" }));
@@ -476,13 +446,9 @@ describe("Security", () => {
     const b = await trackedWs();
     await a.next();
     await b.next();
-    a.ws.send(
-      JSON.stringify({ action: "join", name: "Ra", lobbyId: "reactstr" }),
-    );
+    a.ws.send(JSON.stringify({ action: "join", name: "Ra", lobbyId: "reactstr" }));
     await new Promise((r) => setTimeout(r, 100));
-    b.ws.send(
-      JSON.stringify({ action: "join", name: "Rb", lobbyId: "reactstr" }),
-    );
+    b.ws.send(JSON.stringify({ action: "join", name: "Rb", lobbyId: "reactstr" }));
     await new Promise((r) => setTimeout(r, 100));
     a.ws.send(JSON.stringify({ action: "ready" }));
     b.ws.send(JSON.stringify({ action: "ready" }));
@@ -563,13 +529,9 @@ describe("Security", () => {
     const b = await trackedWs();
     await a.next();
     await b.next();
-    a.ws.send(
-      JSON.stringify({ action: "join", name: "da", lobbyId: "devmal" }),
-    );
+    a.ws.send(JSON.stringify({ action: "join", name: "da", lobbyId: "devmal" }));
     await new Promise((r) => setTimeout(r, 100));
-    b.ws.send(
-      JSON.stringify({ action: "join", name: "db", lobbyId: "devmal" }),
-    );
+    b.ws.send(JSON.stringify({ action: "join", name: "db", lobbyId: "devmal" }));
     await new Promise((r) => setTimeout(r, 100));
     a.ws.send(JSON.stringify({ action: "ready" }));
     b.ws.send(JSON.stringify({ action: "ready" }));
@@ -627,8 +589,6 @@ describe("Security", () => {
     expect(resp.status).toBe(200);
     expect(resp.headers.get("x-content-type-options")).toBe("nosniff");
     expect(resp.headers.get("x-frame-options")).toBe("DENY");
-    expect(resp.headers.get("content-security-policy")).toContain(
-      "default-src 'self'",
-    );
+    expect(resp.headers.get("content-security-policy")).toContain("default-src 'self'");
   });
 });
