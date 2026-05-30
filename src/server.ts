@@ -106,8 +106,7 @@ const allowFiles: StaticFile[] = [
 // keys like __proto__, constructor, toString. Without this, GET /__proto__ falls
 // into the static-file branch with a destructured `type` of `undefined`, which
 // then crashes the server via res.setHeader('Content-Type', undefined).
-const files: Record<string, { content: Buffer; type: string }> =
-  Object.create(null);
+const files: Record<string, { content: Buffer; type: string }> = Object.create(null);
 
 const PROJECT_ROOT = path.resolve(import.meta.dirname, "..");
 
@@ -116,8 +115,7 @@ function safeResolve(...segments: string[]): string | null {
   const cwd = path.resolve(process.cwd());
   const root = PROJECT_ROOT;
   if (resolved.startsWith(cwd + path.sep) || resolved === cwd) return resolved;
-  if (resolved.startsWith(root + path.sep) || resolved === root)
-    return resolved;
+  if (resolved.startsWith(root + path.sep) || resolved === root) return resolved;
   return null;
 }
 
@@ -146,11 +144,7 @@ function normalizeLobbyId(v: string): string {
 }
 
 function isValidPlayerName(v: unknown): v is string {
-  return (
-    typeof v === "string" &&
-    v.length >= NAME_LENGTH_MIN &&
-    v.length <= NAME_LENGTH_MAX
-  );
+  return typeof v === "string" && v.length >= NAME_LENGTH_MIN && v.length <= NAME_LENGTH_MAX;
 }
 
 // Origin allowlist for WebSocket upgrades. Defaults to "same host" — i.e. the
@@ -163,10 +157,7 @@ const EXTRA_ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
-function isAllowedOrigin(
-  origin: string | undefined,
-  hostHeader: string | undefined,
-): boolean {
+function isAllowedOrigin(origin: string | undefined, hostHeader: string | undefined): boolean {
   if (!origin) return true; // non-browser client
   if (EXTRA_ALLOWED_ORIGINS.includes(origin)) return true;
   if (!hostHeader) return false;
@@ -178,9 +169,7 @@ function isAllowedOrigin(
   }
 }
 
-const PKG = JSON.parse(
-  readFileSync(safeResolve(PROJECT_ROOT, "package.json")!, "utf-8"),
-);
+const PKG = JSON.parse(readFileSync(safeResolve(PROJECT_ROOT, "package.json")!, "utf-8"));
 const VERSION = PKG.version || "1.0.0";
 
 function loadStaticFiles(): void {
@@ -199,12 +188,7 @@ function loadStaticFiles(): void {
   // Preload icon SVGs from manifest
   let manifestPath = safeResolve(import.meta.dirname, "icons", "manifest.json");
   if (!manifestPath || !existsSync(manifestPath)) {
-    manifestPath = safeResolve(
-      PROJECT_ROOT,
-      "public",
-      "icons",
-      "manifest.json",
-    );
+    manifestPath = safeResolve(PROJECT_ROOT, "public", "icons", "manifest.json");
   }
   if (manifestPath) {
     const iconFiles: string[] = JSON.parse(readFileSync(manifestPath, "utf-8"));
@@ -283,38 +267,32 @@ const httpServer = new Server((req: IncomingMessage, res: ServerResponse) => {
   return res.end();
 });
 
-httpServer.on(
-  "upgrade",
-  (request: IncomingMessage, socket: import("net").Socket, head: Buffer) => {
-    const { pathname } = new URL(
-      request.url!,
-      `http://${request.headers.host}`,
-    );
+httpServer.on("upgrade", (request: IncomingMessage, socket: import("net").Socket, head: Buffer) => {
+  const { pathname } = new URL(request.url!, `http://${request.headers.host}`);
 
-    if (pathname !== "/ws") {
-      socket.destroy();
-      return;
-    }
+  if (pathname !== "/ws") {
+    socket.destroy();
+    return;
+  }
 
-    // Origin check — reject cross-site WebSocket hijacking attempts. The
-    // browser enforces same-origin for fetch/XHR but NOT for WebSockets, so
-    // the server has to do it. Non-browser clients omit Origin and are allowed
-    // through (they're not subject to CSWSH).
-    const origin = request.headers.origin as string | undefined;
-    if (!isAllowedOrigin(origin, request.headers.host)) {
-      serverWarn("rejected ws upgrade from cross-origin", {
-        origin,
-        host: request.headers.host,
-      });
-      socket.destroy();
-      return;
-    }
-
-    wss.handleUpgrade(request, socket, head, (ws) => {
-      wss.emit("connection", ws, request);
+  // Origin check — reject cross-site WebSocket hijacking attempts. The
+  // browser enforces same-origin for fetch/XHR but NOT for WebSockets, so
+  // the server has to do it. Non-browser clients omit Origin and are allowed
+  // through (they're not subject to CSWSH).
+  const origin = request.headers.origin as string | undefined;
+  if (!isAllowedOrigin(origin, request.headers.host)) {
+    serverWarn("rejected ws upgrade from cross-origin", {
+      origin,
+      host: request.headers.host,
     });
-  },
-);
+    socket.destroy();
+    return;
+  }
+
+  wss.handleUpgrade(request, socket, head, (ws) => {
+    wss.emit("connection", ws, request);
+  });
+});
 
 const wss = new WebSocketServer({ noServer: true, maxPayload: WS_MAX_PAYLOAD });
 // Catch-all for any error bubbled to the WebSocketServer itself; without this
@@ -465,11 +443,7 @@ function broadcastToLobby(
 ): void {
   [...clients.keys()].forEach((client) => {
     const metadata = clients.get(client);
-    if (
-      metadata &&
-      metadata.lobbyId === lobbyId &&
-      metadata.id !== excludeClientId
-    ) {
+    if (metadata && metadata.lobbyId === lobbyId && metadata.id !== excludeClientId) {
       client.send(JSON.stringify(message));
     }
   });
@@ -512,21 +486,7 @@ function createDeck(lobbyId: string): void {
   if (!lobby) return;
 
   const colors = ["red", "yellow", "green", "blue"];
-  const types = [
-    "0",
-    "1",
-    "2",
-    "3",
-    "4",
-    "5",
-    "6",
-    "7",
-    "8",
-    "9",
-    "skip",
-    "reverse",
-    "draw2",
-  ];
+  const types = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "skip", "reverse", "draw2"];
   const wildTypes = ["wild", "wild4"];
 
   for (const color of colors) {
@@ -551,30 +511,13 @@ function shuffleDeck(lobbyId: string): void {
 
   for (let i = lobby.game.deck.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [lobby.game.deck[i], lobby.game.deck[j]] = [
-      lobby.game.deck[j],
-      lobby.game.deck[i],
-    ];
+    [lobby.game.deck[i], lobby.game.deck[j]] = [lobby.game.deck[j], lobby.game.deck[i]];
   }
 }
 
 function generateRandomCard(): Card {
   const colors = ["red", "yellow", "green", "blue"];
-  const types = [
-    "0",
-    "1",
-    "2",
-    "3",
-    "4",
-    "5",
-    "6",
-    "7",
-    "8",
-    "9",
-    "skip",
-    "reverse",
-    "draw2",
-  ];
+  const types = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "skip", "reverse", "draw2"];
   const r = Math.random();
   if (r < 0.05) return { type: "wild4" };
   if (r < 0.1) return { type: "wild" };
@@ -584,11 +527,7 @@ function generateRandomCard(): Card {
   };
 }
 
-function drawCardsFromDeck(
-  lobby: Lobby,
-  lobbyId: string,
-  count: number,
-): Card[] {
+function drawCardsFromDeck(lobby: Lobby, lobbyId: string, count: number): Card[] {
   const drawn: Card[] = [];
   while (drawn.length < count) {
     let card: Card;
@@ -713,8 +652,7 @@ function broadcastGameAborted(lobbyId: string, excludePlayerId: string): void {
   broadcastToLobby(lobbyId, { action: "game_aborted" }, excludePlayerId);
 
   for (const [client, meta] of clients) {
-    if (meta.lobbyId === lobbyId && meta.id !== excludePlayerId)
-      meta.lobbyId = null;
+    if (meta.lobbyId === lobbyId && meta.id !== excludePlayerId) meta.lobbyId = null;
   }
   lobby.players = [];
   lobby.game = {
@@ -900,9 +838,7 @@ function onTurnTimeout(lobbyId: string, expectedPlayerId: string): void {
   if (!currentPlayer || currentPlayer.id !== expectedPlayerId) return;
   if (currentPlayer.isAI || currentPlayer.disconnected) return;
 
-  serverLog(
-    `turn timeout in ${lobbyId.slice(0, 8)} — auto-drawing for ${currentPlayer.name}`,
-  );
+  serverLog(`turn timeout in ${lobbyId.slice(0, 8)} — auto-drawing for ${currentPlayer.name}`);
   // Notify everyone in the lobby so the client can flash a status line.
   // We send before auto-draw so the message lands in the same render frame
   // as the resulting update.
@@ -947,11 +883,7 @@ function scheduleAIMove(lobbyId: string): void {
   }
 }
 
-function handlePlayMultiple(
-  lobbyId: string,
-  playerId: string,
-  cards: Card[],
-): void {
+function handlePlayMultiple(lobbyId: string, playerId: string, cards: Card[]): void {
   const lobby = lobbies.get(lobbyId);
   if (!lobby) return;
 
@@ -983,9 +915,7 @@ function handlePlayMultiple(
     if (card.type === "wild" || card.type === "wild4") {
       cardIndex = handCopy.findIndex((c) => c && c.type === card.type);
     } else {
-      cardIndex = handCopy.findIndex(
-        (c) => c && c.color === card.color && c.type === card.type,
-      );
+      cardIndex = handCopy.findIndex((c) => c && c.color === card.color && c.type === card.type);
     }
     if (cardIndex < 0) {
       return;
@@ -1011,27 +941,19 @@ function handlePlayMultiple(
     // the accumulated penalty to the player who broke it. Without this the
     // chain effect is silently dropped (TODO #3 — "普通牌在部分情况下会使
     // 得链式加牌的加牌效果被跳过").
-    if (
-      lobby.game.drawMode !== "direct" &&
-      lobby.game.state === LobbyGameState.drawing
-    ) {
+    if (lobby.game.drawMode !== "direct" && lobby.game.state === LobbyGameState.drawing) {
       const penalty = lobby.game.drawingCount;
       if (penalty > 0 && player) {
         player.hand!.push(...drawCardsFromDeck(lobby, lobbyId, penalty));
       }
     }
     lobby.game.turn =
-      (lobby.game.turn +
-        (cardCount + 1) * lobby.game.direction +
-        lobby.players.length) %
+      (lobby.game.turn + (cardCount + 1) * lobby.game.direction + lobby.players.length) %
       lobby.players.length;
     lobby.game.state = LobbyGameState.normal;
     lobby.game.drawingCount = 0;
   } else if (lastCard.type === "reverse") {
-    if (
-      lobby.game.drawMode !== "direct" &&
-      lobby.game.state === LobbyGameState.drawing
-    ) {
+    if (lobby.game.drawMode !== "direct" && lobby.game.state === LobbyGameState.drawing) {
       const penalty = lobby.game.drawingCount;
       if (penalty > 0 && player) {
         player.hand!.push(...drawCardsFromDeck(lobby, lobbyId, penalty));
@@ -1041,41 +963,33 @@ function handlePlayMultiple(
       lobby.game.direction *= -1;
     }
     lobby.game.turn =
-      (lobby.game.turn + lobby.game.direction + lobby.players.length) %
-      lobby.players.length;
+      (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
     lobby.game.state = LobbyGameState.normal;
     lobby.game.drawingCount = 0;
   } else if (lastCard.type === "draw2" || lastCard.type === "wild4") {
     const n = (lastCard.type === "draw2" ? 2 : 4) * cardCount;
     if (lobby.game.drawMode === "direct") {
       const nextPlayerIndex =
-        (lobby.game.turn + lobby.game.direction + lobby.players.length) %
-        lobby.players.length;
+        (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
       const nextPlayer = lobby.players[nextPlayerIndex];
       nextPlayer.hand!.push(...drawCardsFromDeck(lobby, lobbyId, n));
       lobby.game.turn =
-        (lobby.game.turn + lobby.game.direction + lobby.players.length) %
-        lobby.players.length;
+        (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
       lobby.game.state = LobbyGameState.normal;
       lobby.game.drawingCount = 0;
     } else if (lobby.game.state === LobbyGameState.normal) {
       lobby.game.state = LobbyGameState.drawing;
       lobby.game.drawingCount = n;
       lobby.game.turn =
-        (lobby.game.turn + lobby.game.direction + lobby.players.length) %
-        lobby.players.length;
+        (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
     } else {
       lobby.game.drawingCount += n;
       lobby.game.turn =
-        (lobby.game.turn + lobby.game.direction + lobby.players.length) %
-        lobby.players.length;
+        (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
     }
   } else {
     // Non-draw card: break chain (chain mode only)
-    if (
-      lobby.game.drawMode !== "direct" &&
-      lobby.game.state === LobbyGameState.drawing
-    ) {
+    if (lobby.game.drawMode !== "direct" && lobby.game.state === LobbyGameState.drawing) {
       const penalty = lobby.game.drawingCount;
       lobby.game.state = LobbyGameState.normal;
       lobby.game.drawingCount = 0;
@@ -1084,8 +998,7 @@ function handlePlayMultiple(
       }
     }
     lobby.game.turn =
-      (lobby.game.turn + lobby.game.direction + lobby.players.length) %
-      lobby.players.length;
+      (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
   }
 
   broadcastGameUpdate(lobbyId);
@@ -1111,9 +1024,7 @@ function handlePlay(lobbyId: string, playerId: string, card: Card): void {
     if (card.type === "wild" || card.type === "wild4") {
       cardIndex = player!.hand!.findIndex((c) => c.type === card.type);
     } else {
-      cardIndex = player!.hand!.findIndex(
-        (c) => c.color === card.color && c.type === card.type,
-      );
+      cardIndex = player!.hand!.findIndex((c) => c.color === card.color && c.type === card.type);
     }
 
     // Reject plays of cards that are not actually in the player's hand:
@@ -1132,25 +1043,18 @@ function handlePlay(lobbyId: string, playerId: string, card: Card): void {
       // Chain-breaking via skip/reverse must still apply the penalty in
       // chain mode (TODO #3). Without this, the player breaks the chain
       // for free.
-      if (
-        lobby.game.drawMode !== "direct" &&
-        lobby.game.state === LobbyGameState.drawing
-      ) {
+      if (lobby.game.drawMode !== "direct" && lobby.game.state === LobbyGameState.drawing) {
         const penalty = lobby.game.drawingCount;
         if (penalty > 0) {
           player!.hand!.push(...drawCardsFromDeck(lobby, lobbyId, penalty));
         }
       }
       lobby.game.turn =
-        (lobby.game.turn + 2 * lobby.game.direction + lobby.players.length) %
-        lobby.players.length;
+        (lobby.game.turn + 2 * lobby.game.direction + lobby.players.length) % lobby.players.length;
       lobby.game.state = LobbyGameState.normal;
       lobby.game.drawingCount = 0;
     } else if (card.type === "reverse") {
-      if (
-        lobby.game.drawMode !== "direct" &&
-        lobby.game.state === LobbyGameState.drawing
-      ) {
+      if (lobby.game.drawMode !== "direct" && lobby.game.state === LobbyGameState.drawing) {
         const penalty = lobby.game.drawingCount;
         if (penalty > 0) {
           player!.hand!.push(...drawCardsFromDeck(lobby, lobbyId, penalty));
@@ -1158,41 +1062,33 @@ function handlePlay(lobbyId: string, playerId: string, card: Card): void {
       }
       lobby.game.direction *= -1;
       lobby.game.turn =
-        (lobby.game.turn + lobby.game.direction + lobby.players.length) %
-        lobby.players.length;
+        (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
       lobby.game.state = LobbyGameState.normal;
       lobby.game.drawingCount = 0;
     } else if (card.type === "draw2" || card.type === "wild4") {
       const n = card.type === "draw2" ? 2 : 4;
       if (lobby.game.drawMode === "direct") {
         const nextPlayerIndex =
-          (lobby.game.turn + lobby.game.direction + lobby.players.length) %
-          lobby.players.length;
+          (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
         const nextPlayer = lobby.players[nextPlayerIndex];
         nextPlayer.hand!.push(...drawCardsFromDeck(lobby, lobbyId, n));
         lobby.game.turn =
-          (lobby.game.turn + lobby.game.direction + lobby.players.length) %
-          lobby.players.length;
+          (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
         lobby.game.state = LobbyGameState.normal;
         lobby.game.drawingCount = 0;
       } else if (lobby.game.state === LobbyGameState.normal) {
         lobby.game.state = LobbyGameState.drawing;
         lobby.game.drawingCount = n;
         lobby.game.turn =
-          (lobby.game.turn + lobby.game.direction + lobby.players.length) %
-          lobby.players.length;
+          (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
       } else {
         lobby.game.drawingCount += n;
         lobby.game.turn =
-          (lobby.game.turn + lobby.game.direction + lobby.players.length) %
-          lobby.players.length;
+          (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
       }
     } else {
       // Non-draw card: break chain (chain mode only)
-      if (
-        lobby.game.drawMode !== "direct" &&
-        lobby.game.state === LobbyGameState.drawing
-      ) {
+      if (lobby.game.drawMode !== "direct" && lobby.game.state === LobbyGameState.drawing) {
         const penalty = lobby.game.drawingCount;
         lobby.game.state = LobbyGameState.normal;
         lobby.game.drawingCount = 0;
@@ -1201,8 +1097,7 @@ function handlePlay(lobbyId: string, playerId: string, card: Card): void {
         }
       }
       lobby.game.turn =
-        (lobby.game.turn + lobby.game.direction + lobby.players.length) %
-        lobby.players.length;
+        (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
     }
 
     broadcastGameUpdate(lobbyId);
@@ -1236,16 +1131,14 @@ function handleDraw(lobbyId: string, playerId: string): void {
       player.hand!.push(...drawCardsFromDeck(lobby, lobbyId, 1));
     }
     lobby.game.turn =
-      (lobby.game.turn + lobby.game.direction + lobby.players.length) %
-      lobby.players.length;
+      (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
     broadcastGameUpdate(lobbyId);
     return;
   }
 
   if (player.hand!.length >= MAX_HAND_CARDS) {
     lobby.game.turn =
-      (lobby.game.turn + lobby.game.direction + lobby.players.length) %
-      lobby.players.length;
+      (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
     broadcastGameUpdate(lobbyId);
     return;
   }
@@ -1255,8 +1148,7 @@ function handleDraw(lobbyId: string, playerId: string): void {
     player.hand!.push(drawn[0]);
   }
   lobby.game.turn =
-    (lobby.game.turn + lobby.game.direction + lobby.players.length) %
-    lobby.players.length;
+    (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
   broadcastGameUpdate(lobbyId);
 }
 
@@ -1285,9 +1177,7 @@ function checkAutoUno(_lobbyId: string, player: Player): boolean {
   if (player.hand && player.hand.length > 1) {
     const firstCard = player.hand[0];
     if (firstCard.type !== "wild" && firstCard.type !== "wild4") {
-      const allSameType = player.hand.every(
-        (card) => card.type === firstCard.type,
-      );
+      const allSameType = player.hand.every((card) => card.type === firstCard.type);
       if (allSameType) {
         player.uno = true;
         return true;
@@ -1517,9 +1407,7 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
             if (!lobby.players.some((p) => !p.isAI)) {
               broadcastGameAborted(lobby.id, "");
             } else {
-              ws.send(
-                JSON.stringify({ action: "spectate_offer", lobbyId: lobby.id }),
-              );
+              ws.send(JSON.stringify({ action: "spectate_offer", lobbyId: lobby.id }));
             }
             return;
           }
@@ -1528,10 +1416,7 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
             (p) => p.name.toLowerCase() === (message.name || "").toLowerCase(),
           );
           if (existingPlayer) {
-            if (
-              existingPlayer.id === message.playerId ||
-              existingPlayer.disconnected
-            ) {
+            if (existingPlayer.id === message.playerId || existingPlayer.disconnected) {
               const oldTimer = disconnectTimers.get(existingPlayer.id);
               if (oldTimer) clearTimeout(oldTimer);
               disconnectTimers.delete(existingPlayer.id);
@@ -1621,9 +1506,7 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
             ws.send(JSON.stringify(errorResponse("CREATOR_ONLY_AI_READY")));
             return;
           }
-          const aiPlayer = lobby.players.find(
-            (p) => p.id === message.playerId && p.isAI,
-          );
+          const aiPlayer = lobby.players.find((p) => p.id === message.playerId && p.isAI);
           if (!aiPlayer) {
             ws.send(JSON.stringify(errorResponse("AI_NOT_FOUND")));
             return;
@@ -1645,9 +1528,7 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
             ws.send(JSON.stringify(errorResponse("GAME_ALREADY_STARTED")));
             return;
           }
-          const aiIndex = lobby.players.findIndex(
-            (p) => p.id === message.playerId && p.isAI,
-          );
+          const aiIndex = lobby.players.findIndex((p) => p.id === message.playerId && p.isAI);
           if (aiIndex === -1) {
             ws.send(JSON.stringify(errorResponse("AI_NOT_FOUND")));
             return;
@@ -1764,9 +1645,7 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
           if (!lobbyAlive) {
             const newId = uuidv4();
             metadata.id = newId;
-            serverLog(
-              `reconnect lobby dead, new session newId=${newId.slice(0, 8)}`,
-            );
+            serverLog(`reconnect lobby dead, new session newId=${newId.slice(0, 8)}`);
             ws.send(
               JSON.stringify({
                 action: "init",
@@ -1777,9 +1656,7 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
             );
             return;
           }
-          const existingPlayer = rLobby!.players.find(
-            (p) => p.id === message.playerId,
-          );
+          const existingPlayer = rLobby!.players.find((p) => p.id === message.playerId);
           serverLog(
             `reconnect existingPlayer=${!!existingPlayer} disconnected=${existingPlayer?.disconnected} ready=${existingPlayer?.ready}`,
           );
@@ -1928,9 +1805,7 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
         case "surrender": {
           const sLobby = lobbies.get(metadata.lobbyId || "");
           if (!sLobby || !sLobby.game.started) return;
-          const surrenderPlayer = sLobby.players.find(
-            (p) => p.id === metadata.id,
-          );
+          const surrenderPlayer = sLobby.players.find((p) => p.id === metadata.id);
           if (!surrenderPlayer) return;
 
           const remaining = sLobby.players.filter((p) => p.id !== metadata.id);
@@ -1938,16 +1813,14 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
           // No human players left → nobody won
           if (realRemaining.length === 0) {
             const lobbyId = metadata.lobbyId!;
-            if (surrenderPlayer.hand)
-              sLobby.game.discardPile.push(...surrenderPlayer.hand);
+            if (surrenderPlayer.hand) sLobby.game.discardPile.push(...surrenderPlayer.hand);
             const idx = sLobby.players.indexOf(surrenderPlayer);
             sLobby.players.splice(idx, 1);
             metadata.lobbyId = null;
             sessions.delete(surrenderPlayer.id);
             ws.send(JSON.stringify({ action: "win", winner: "" }));
             broadcastToLobby(lobbyId, { action: "win", winner: "" });
-            for (const [, m] of clients)
-              m.lobbyId === lobbyId && (m.lobbyId = null);
+            for (const [, m] of clients) m.lobbyId === lobbyId && (m.lobbyId = null);
             sLobby.players = [];
             sLobby.game = {
               deck: [],
@@ -1990,9 +1863,7 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
           }
           lobby.players.splice(idx, 1);
           if (idx < lobby.game.turn && lobby.players.length > 0) {
-            lobby.game.turn =
-              (lobby.game.turn - 1 + lobby.players.length) %
-              lobby.players.length;
+            lobby.game.turn = (lobby.game.turn - 1 + lobby.players.length) % lobby.players.length;
           }
           sessions.delete(metadata.id);
           metadata.isSpectator = true;
@@ -2055,11 +1926,7 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
           // bounded string. The emoji path used to accept arbitrary types and
           // unlimited length, which let a malicious client broadcast an
           // unbounded payload to every player in the room.
-          if (
-            typeof message.content !== "string" ||
-            message.content.length === 0
-          )
-            break;
+          if (typeof message.content !== "string" || message.content.length === 0) break;
           if (message.content.length > REACTION_CONTENT_MAX) break;
           if (message.type === "emoji") {
             broadcastToLobby(metadata.lobbyId!, {
@@ -2071,8 +1938,7 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
           } else if (message.type === "text") {
             let width = 0;
             for (const ch of message.content) {
-              if (/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/.test(ch))
-                width += 1;
+              if (/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/.test(ch)) width += 1;
               else width += 0.3;
             }
             if (width > 64) break;
@@ -2164,10 +2030,7 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
             ws.send(JSON.stringify(errorResponse("PLAYER_NOT_FOUND")));
             return;
           }
-          const removeCount = Math.min(
-            message.count || 1,
-            player3.hand!.length,
-          );
+          const removeCount = Math.min(message.count || 1, player3.hand!.length);
           player3.hand!.splice(0, removeCount);
           if (player3.hand!.length === 0) {
             broadcastWin(metadata.lobbyId!, player3.name);
@@ -2259,9 +2122,7 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
         }
         case "dev_export_state": {
           logState("export", metadata);
-          ws.send(
-            JSON.stringify({ action: "dev_state_export", log: stateLog }),
-          );
+          ws.send(JSON.stringify({ action: "dev_state_export", log: stateLog }));
           return;
         }
         case "dev_toggle_turn_timer": {
@@ -2334,9 +2195,7 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
     const metadata = clients.get(ws);
     logState("close", metadata);
     if (metadata && metadata.lobbyId) {
-      const player = lobbies
-        .get(metadata.lobbyId)
-        ?.players.find((p) => p.id === metadata.id);
+      const player = lobbies.get(metadata.lobbyId)?.players.find((p) => p.id === metadata.id);
       if (player) player.disconnected = true;
       scheduleProcessClose(metadata.id, ws, metadata);
     }
@@ -2344,11 +2203,7 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
   });
 });
 
-function scheduleProcessClose(
-  playerId: string,
-  ws: WebSocket,
-  metadata: ClientMetadata,
-): void {
+function scheduleProcessClose(playerId: string, ws: WebSocket, metadata: ClientMetadata): void {
   const deferKey = playerId || (metadata && metadata.lobbyId!);
   if (!deferKey) return processClose(ws, metadata);
   const existing = deferTimers.get(deferKey);
@@ -2396,8 +2251,7 @@ function processClose(_ws: WebSocket, metadata: ClientMetadata): void {
         const lobbyNow = lobbies.get(lobbyId);
         if (!lobbyNow || !lobbyNow.game.started) return;
         const stillNoHumans =
-          lobbyNow.players.filter((p) => !p.isAI && !p.disconnected).length ===
-          0;
+          lobbyNow.players.filter((p) => !p.isAI && !p.disconnected).length === 0;
         if (stillNoHumans) {
           serverLog(`all-humans-gone abort fires in ${lobbyId.slice(0, 8)}`);
           broadcastGameAborted(lobbyId, "");
@@ -2410,13 +2264,9 @@ function processClose(_ws: WebSocket, metadata: ClientMetadata): void {
   const reconnectTimer = setTimeout(() => {
     reconnectTimers.delete(player.id);
     if (!player.disconnected) return;
-    if (
-      lobby.game.started &&
-      lobby.game.turn === lobby.players.indexOf(player)
-    ) {
+    if (lobby.game.started && lobby.game.turn === lobby.players.indexOf(player)) {
       lobby.game.turn =
-        (lobby.game.turn + lobby.game.direction + lobby.players.length) %
-        lobby.players.length;
+        (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
       broadcastGameUpdate(metadata.lobbyId!);
     }
     const oldTimer = disconnectTimers.get(player.id);
@@ -2472,14 +2322,12 @@ function handleLeave(lobbyId: string, playerId: string): void {
     // If it was this player's turn, advance
     if (playerIndex === lobby.game.turn) {
       lobby.game.turn =
-        (lobby.game.turn + lobby.game.direction + lobby.players.length) %
-        lobby.players.length;
+        (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
     }
     lobby.players.splice(playerIndex, 1);
     // Adjust turn if removed before current
     if (playerIndex < lobby.game.turn && lobby.players.length > 0) {
-      lobby.game.turn =
-        (lobby.game.turn - 1 + lobby.players.length) % lobby.players.length;
+      lobby.game.turn = (lobby.game.turn - 1 + lobby.players.length) % lobby.players.length;
     }
 
     if (player.isCreator && !lobby.game.started) {
@@ -2509,9 +2357,7 @@ function handleLeave(lobbyId: string, playerId: string): void {
         turn: lobby.game.turn,
         lobbyId: lobbyId,
         turnDeadline: lobby.game.started ? getTurnDeadline(lobbyId) : null,
-        turnTimerPaused: lobby.game.started
-          ? isTurnTimerPaused(lobbyId)
-          : false,
+        turnTimerPaused: lobby.game.started ? isTurnTimerPaused(lobbyId) : false,
       },
       playerId,
     );
@@ -2527,9 +2373,7 @@ function handleLeave(lobbyId: string, playerId: string): void {
 }
 
 function hasFlagExitImmediately(): boolean {
-  return (
-    process.argv.includes("--exit-immediately") || process.argv.includes("-e")
-  );
+  return process.argv.includes("--exit-immediately") || process.argv.includes("-e");
 }
 
 function isDev(): boolean {
@@ -2570,9 +2414,7 @@ process.on("SIGINT", () => {
   }
 });
 
-httpServer.on("listening", () =>
-  serverLog(`Server started on port http://0.0.0.0:${PORT}\n`),
-);
+httpServer.on("listening", () => serverLog(`Server started on port http://0.0.0.0:${PORT}\n`));
 httpServer.on("error", (e: Error) => {
   console.error(e);
   process.emit("SIGINT");

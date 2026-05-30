@@ -22,9 +22,7 @@ beforeAll(async () => {
     silent: true,
   });
   serverProcess.stdout.on("data", (d) => process.stdout.write(`[server] ${d}`));
-  serverProcess.stderr.on("data", (d) =>
-    process.stderr.write(`[server-err] ${d}`),
-  );
+  serverProcess.stderr.on("data", (d) => process.stderr.write(`[server-err] ${d}`));
   await new Promise((r) => setTimeout(r, 1500));
   browser = await chromium.launch({ headless: true });
 });
@@ -67,10 +65,7 @@ async function typeName(p, name) {
 // across many tabs matters.
 async function waitForStableSlots(pages) {
   for (const p of pages) {
-    await p.waitForFunction(
-      () => Number(sessionStorage.getItem("unoSlot")) > 0,
-      { timeout: 5000 },
-    );
+    await p.waitForFunction(() => Number(sessionStorage.getItem("unoSlot")) > 0, { timeout: 5000 });
   }
   // 2x heartbeat cadence so every tab has at least one heartbeat-round
   // worth of peer visibility.
@@ -91,150 +86,132 @@ describe("Slot allocation", () => {
     await ctx.close();
   });
 
-  it(
-    "typed names are isolated between concurrent tabs",
-    { timeout: 15000 },
-    async () => {
-      const ctx = await browser.newContext();
-      const a = await openTab(ctx);
-      const b = await openTab(ctx);
-      const c = await openTab(ctx);
-      await typeName(a, "11");
-      await typeName(b, "22");
-      await typeName(c, "33");
-      expect(await getName(a)).toBe("11");
-      expect(await getName(b)).toBe("22");
-      expect(await getName(c)).toBe("33");
-      await a.close();
-      await b.close();
-      await c.close();
-      await ctx.close();
-    },
-  );
+  it("typed names are isolated between concurrent tabs", { timeout: 15000 }, async () => {
+    const ctx = await browser.newContext();
+    const a = await openTab(ctx);
+    const b = await openTab(ctx);
+    const c = await openTab(ctx);
+    await typeName(a, "11");
+    await typeName(b, "22");
+    await typeName(c, "33");
+    expect(await getName(a)).toBe("11");
+    expect(await getName(b)).toBe("22");
+    expect(await getName(c)).toBe("33");
+    await a.close();
+    await b.close();
+    await c.close();
+    await ctx.close();
+  });
 
   // ── Sequential reopen ─────────────────────────────────────
 
-  it(
-    "sequential close-reopen: 11/22/33 in slot order",
-    { timeout: 30000 },
-    async () => {
-      const ctx = await browser.newContext();
-      // Round 1
-      const r1 = [];
-      for (const n of ["11", "22", "33"]) {
-        const p = await openTab(ctx);
-        await typeName(p, n);
-        r1.push(p);
-      }
-      for (const p of r1) await p.close();
-      await new Promise((r) => setTimeout(r, 4500));
+  it("sequential close-reopen: 11/22/33 in slot order", { timeout: 30000 }, async () => {
+    const ctx = await browser.newContext();
+    // Round 1
+    const r1 = [];
+    for (const n of ["11", "22", "33"]) {
+      const p = await openTab(ctx);
+      await typeName(p, n);
+      r1.push(p);
+    }
+    for (const p of r1) await p.close();
+    await new Promise((r) => setTimeout(r, 4500));
 
-      // Round 2 — sequential opens
-      const r2 = [];
-      for (let i = 0; i < 3; i++) r2.push(await openTab(ctx));
-      const result = await Promise.all(
-        r2.map(async (p) => ({
-          slot: await getSlot(p),
-          name: await getName(p),
-        })),
-      );
-      expect(result).toEqual([
-        { slot: 1, name: "11" },
-        { slot: 2, name: "22" },
-        { slot: 3, name: "33" },
-      ]);
-      for (const p of r2) await p.close();
-      await ctx.close();
-    },
-  );
+    // Round 2 — sequential opens
+    const r2 = [];
+    for (let i = 0; i < 3; i++) r2.push(await openTab(ctx));
+    const result = await Promise.all(
+      r2.map(async (p) => ({
+        slot: await getSlot(p),
+        name: await getName(p),
+      })),
+    );
+    expect(result).toEqual([
+      { slot: 1, name: "11" },
+      { slot: 2, name: "22" },
+      { slot: 3, name: "33" },
+    ]);
+    for (const p of r2) await p.close();
+    await ctx.close();
+  });
 
   // ── Parallel reopen ───────────────────────────────────────
 
-  it(
-    "parallel close-reopen: each slot keeps its own name",
-    { timeout: 30000 },
-    async () => {
-      const ctx = await browser.newContext();
-      const NAMES = ["11", "22", "33"];
+  it("parallel close-reopen: each slot keeps its own name", { timeout: 30000 }, async () => {
+    const ctx = await browser.newContext();
+    const NAMES = ["11", "22", "33"];
 
-      // Round 1
-      const r1 = [];
-      for (const n of NAMES) {
-        const p = await openTab(ctx);
-        await typeName(p, n);
-        r1.push(p);
-      }
-      for (const p of r1) await p.close();
-      await new Promise((r) => setTimeout(r, 4500));
+    // Round 1
+    const r1 = [];
+    for (const n of NAMES) {
+      const p = await openTab(ctx);
+      await typeName(p, n);
+      r1.push(p);
+    }
+    for (const p of r1) await p.close();
+    await new Promise((r) => setTimeout(r, 4500));
 
-      // Round 2 — all three tabs navigate at the same time.
-      const r2 = await Promise.all(
-        NAMES.map(async () => {
+    // Round 2 — all three tabs navigate at the same time.
+    const r2 = await Promise.all(
+      NAMES.map(async () => {
+        const p = await ctx.newPage();
+        const navP = p.goto(BASE);
+        return { p, navP };
+      }),
+    );
+    for (const { p, navP } of r2) {
+      await navP;
+      await p.waitForFunction(() => Number(sessionStorage.getItem("unoSlot")) > 0, {
+        timeout: 5000,
+      });
+    }
+    await waitForStableSlots(r2.map((x) => x.p));
+
+    const result = await Promise.all(
+      r2.map(async ({ p }) => ({
+        slot: await getSlot(p),
+        name: await getName(p),
+      })),
+    );
+    const bySlot = new Map(result.map((r) => [r.slot, r.name]));
+    expect(bySlot.size).toBe(3);
+    expect(bySlot.get(1)).toBe("11");
+    expect(bySlot.get(2)).toBe("22");
+    expect(bySlot.get(3)).toBe("33");
+    for (const { p } of r2) await p.close();
+    await ctx.close();
+  });
+
+  // ── Same-slot collision regressions ───────────────────────
+
+  it("after the dust settles, no two tabs hold the same slot", { timeout: 60000 }, async () => {
+    // Open 4 tabs in parallel many times; each round must end with 4
+    // distinct slots. Without proper collision detection / preference
+    // exchange the parallel boot can result in two tabs both claiming
+    // slot 1.
+    const ctx = await browser.newContext();
+    for (let round = 0; round < 3; round++) {
+      const tabs = await Promise.all(
+        [0, 1, 2, 3].map(async () => {
           const p = await ctx.newPage();
           const navP = p.goto(BASE);
           return { p, navP };
         }),
       );
-      for (const { p, navP } of r2) {
+      for (const { p, navP } of tabs) {
         await navP;
-        await p.waitForFunction(
-          () => Number(sessionStorage.getItem("unoSlot")) > 0,
-          { timeout: 5000 },
-        );
+        await p.waitForFunction(() => Number(sessionStorage.getItem("unoSlot")) > 0, {
+          timeout: 5000,
+        });
       }
-      await waitForStableSlots(r2.map((x) => x.p));
-
-      const result = await Promise.all(
-        r2.map(async ({ p }) => ({
-          slot: await getSlot(p),
-          name: await getName(p),
-        })),
-      );
-      const bySlot = new Map(result.map((r) => [r.slot, r.name]));
-      expect(bySlot.size).toBe(3);
-      expect(bySlot.get(1)).toBe("11");
-      expect(bySlot.get(2)).toBe("22");
-      expect(bySlot.get(3)).toBe("33");
-      for (const { p } of r2) await p.close();
-      await ctx.close();
-    },
-  );
-
-  // ── Same-slot collision regressions ───────────────────────
-
-  it(
-    "after the dust settles, no two tabs hold the same slot",
-    { timeout: 60000 },
-    async () => {
-      // Open 4 tabs in parallel many times; each round must end with 4
-      // distinct slots. Without proper collision detection / preference
-      // exchange the parallel boot can result in two tabs both claiming
-      // slot 1.
-      const ctx = await browser.newContext();
-      for (let round = 0; round < 3; round++) {
-        const tabs = await Promise.all(
-          [0, 1, 2, 3].map(async () => {
-            const p = await ctx.newPage();
-            const navP = p.goto(BASE);
-            return { p, navP };
-          }),
-        );
-        for (const { p, navP } of tabs) {
-          await navP;
-          await p.waitForFunction(
-            () => Number(sessionStorage.getItem("unoSlot")) > 0,
-            { timeout: 5000 },
-          );
-        }
-        await waitForStableSlots(tabs.map((x) => x.p));
-        const slots = await Promise.all(tabs.map(({ p }) => getSlot(p)));
-        expect(new Set(slots).size).toBe(slots.length);
-        for (const { p } of tabs) await p.close();
-        await new Promise((r) => setTimeout(r, 4500));
-      }
-      await ctx.close();
-    },
-  );
+      await waitForStableSlots(tabs.map((x) => x.p));
+      const slots = await Promise.all(tabs.map(({ p }) => getSlot(p)));
+      expect(new Set(slots).size).toBe(slots.length);
+      for (const { p } of tabs) await p.close();
+      await new Promise((r) => setTimeout(r, 4500));
+    }
+    await ctx.close();
+  });
 
   it(
     "collision is resolved within a few heartbeats even in restored state",
@@ -259,10 +236,7 @@ describe("Slot allocation", () => {
         // first, then navigate into the app — pre-set marker is what
         // a real session restore looks like.
         await p.goto(BASE + "/");
-        await p.evaluate(
-          (s) => sessionStorage.setItem("unoSlot", String(s)),
-          slot,
-        );
+        await p.evaluate((s) => sessionStorage.setItem("unoSlot", String(s)), slot);
         await p.reload();
         return p;
       }
@@ -313,17 +287,13 @@ describe("Slot allocation", () => {
       await typeName(p, "F5User");
       // Plant an unoPlayerId for the slot — emulates "joined a lobby".
       const slot = await getSlot(p);
-      await p.evaluate(
-        (s) => localStorage.setItem("unoPlayerId-" + s, "fake-id-1"),
-        slot,
-      );
+      await p.evaluate((s) => localStorage.setItem("unoPlayerId-" + s, "fake-id-1"), slot);
       // Reload — sessionStorage.unoSlot survives, unoPlayerId survives,
       // boot path should keep the slot.
       await p.reload();
-      await p.waitForFunction(
-        () => Number(sessionStorage.getItem("unoSlot")) > 0,
-        { timeout: 5000 },
-      );
+      await p.waitForFunction(() => Number(sessionStorage.getItem("unoSlot")) > 0, {
+        timeout: 5000,
+      });
       expect(await getSlot(p)).toBe(slot);
       await p.close();
       await ctx.close();
@@ -341,10 +311,7 @@ describe("Slot allocation", () => {
       const s = await getSlot(p);
       // Plant a stale identity at this slot to simulate "previous tab
       // joined a lobby and crashed".
-      await p.evaluate(
-        (slot) => localStorage.setItem("unoPlayerId-" + slot, "leaked-id"),
-        s,
-      );
+      await p.evaluate((slot) => localStorage.setItem("unoPlayerId-" + slot, "leaked-id"), s);
       await p.close();
       await new Promise((r) => setTimeout(r, 4500));
 
@@ -397,34 +364,27 @@ describe("Slot allocation", () => {
     },
   );
 
-  it(
-    "three parallel fresh tabs end up on slots 1, 2, 3",
-    { timeout: 30000 },
-    async () => {
-      const ctx = await browser.newContext();
-      const pages = await Promise.all(
-        [0, 1, 2].map(async () => {
-          const p = await ctx.newPage();
-          const navP = p.goto(BASE);
-          return { p, navP };
-        }),
-      );
-      for (const { p, navP } of pages) {
-        await navP;
-        await p.waitForFunction(
-          () => Number(sessionStorage.getItem("unoSlot")) > 0,
-          { timeout: 5000 },
-        );
-      }
-      await waitForStableSlots(pages.map((x) => x.p));
-      const slots = (
-        await Promise.all(pages.map(({ p }) => getSlot(p)))
-      ).sort();
-      expect(slots).toEqual([1, 2, 3]);
-      for (const { p } of pages) await p.close();
-      await ctx.close();
-    },
-  );
+  it("three parallel fresh tabs end up on slots 1, 2, 3", { timeout: 30000 }, async () => {
+    const ctx = await browser.newContext();
+    const pages = await Promise.all(
+      [0, 1, 2].map(async () => {
+        const p = await ctx.newPage();
+        const navP = p.goto(BASE);
+        return { p, navP };
+      }),
+    );
+    for (const { p, navP } of pages) {
+      await navP;
+      await p.waitForFunction(() => Number(sessionStorage.getItem("unoSlot")) > 0, {
+        timeout: 5000,
+      });
+    }
+    await waitForStableSlots(pages.map((x) => x.p));
+    const slots = (await Promise.all(pages.map(({ p }) => getSlot(p)))).sort();
+    expect(slots).toEqual([1, 2, 3]);
+    for (const { p } of pages) await p.close();
+    await ctx.close();
+  });
 
   it(
     "two parallel restored tabs with the SAME stored slot end on distinct slots",
@@ -438,10 +398,7 @@ describe("Slot allocation", () => {
       async function makeRestoredPage(slot) {
         const p = await ctx.newPage();
         await p.goto(BASE + "/");
-        await p.evaluate(
-          (s) => sessionStorage.setItem("unoSlot", String(s)),
-          slot,
-        );
+        await p.evaluate((s) => sessionStorage.setItem("unoSlot", String(s)), slot);
         await p.reload();
         return p;
       }
@@ -463,51 +420,43 @@ describe("Slot allocation", () => {
     },
   );
 
-  it(
-    "after STALE_MS no peer heartbeat is mistakenly kept",
-    { timeout: 60000 },
-    async () => {
-      // Open two tabs, close one, wait long enough that the surviving
-      // tab's pruneStaleSlots evicts the closed tab. Open a fresh
-      // tab — it should land on the freed slot, NOT step over the
-      // surviving tab.
-      const ctx = await browser.newContext();
-      const a = await openTab(ctx);
-      const b = await openTab(ctx);
-      expect(await getSlot(a)).toBe(1);
-      expect(await getSlot(b)).toBe(2);
-      // Close A (slot 1). Wait past STALE_MS so b prunes the entry.
-      await a.close();
-      await new Promise((r) => setTimeout(r, 4500));
-      const c = await openTab(ctx);
-      // c picks lowest free; b is still at slot 2, so c gets slot 1.
-      expect(await getSlot(c)).toBe(1);
-      expect(await getSlot(b)).toBe(2);
-      await b.close();
-      await c.close();
-      await ctx.close();
-    },
-  );
+  it("after STALE_MS no peer heartbeat is mistakenly kept", { timeout: 60000 }, async () => {
+    // Open two tabs, close one, wait long enough that the surviving
+    // tab's pruneStaleSlots evicts the closed tab. Open a fresh
+    // tab — it should land on the freed slot, NOT step over the
+    // surviving tab.
+    const ctx = await browser.newContext();
+    const a = await openTab(ctx);
+    const b = await openTab(ctx);
+    expect(await getSlot(a)).toBe(1);
+    expect(await getSlot(b)).toBe(2);
+    // Close A (slot 1). Wait past STALE_MS so b prunes the entry.
+    await a.close();
+    await new Promise((r) => setTimeout(r, 4500));
+    const c = await openTab(ctx);
+    // c picks lowest free; b is still at slot 2, so c gets slot 1.
+    expect(await getSlot(c)).toBe(1);
+    expect(await getSlot(b)).toBe(2);
+    await b.close();
+    await c.close();
+    await ctx.close();
+  });
 
-  it(
-    "rapid open-close cycles do not leak slots",
-    { timeout: 30000 },
-    async () => {
-      // Simulate the user spamming Cmd+T / Cmd+W. After enough churn,
-      // a fresh tab should still land on slot 1 — no zombie entries.
-      const ctx = await browser.newContext();
-      for (let i = 0; i < 5; i++) {
-        const p = await openTab(ctx);
-        await p.close();
-        await new Promise((r) => setTimeout(r, 200));
-      }
-      await new Promise((r) => setTimeout(r, 4500));
-      const fresh = await openTab(ctx);
-      expect(await getSlot(fresh)).toBe(1);
-      await fresh.close();
-      await ctx.close();
-    },
-  );
+  it("rapid open-close cycles do not leak slots", { timeout: 30000 }, async () => {
+    // Simulate the user spamming Cmd+T / Cmd+W. After enough churn,
+    // a fresh tab should still land on slot 1 — no zombie entries.
+    const ctx = await browser.newContext();
+    for (let i = 0; i < 5; i++) {
+      const p = await openTab(ctx);
+      await p.close();
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    await new Promise((r) => setTimeout(r, 4500));
+    const fresh = await openTab(ctx);
+    expect(await getSlot(fresh)).toBe(1);
+    await fresh.close();
+    await ctx.close();
+  });
 
   // ── Reserved-slot semantics ───────────────────────────────
 
@@ -527,9 +476,7 @@ describe("Slot allocation", () => {
 
       const b = await openTab(ctx);
       expect(await getSlot(b)).toBe(2);
-      await b.evaluate(() =>
-        localStorage.setItem("unoPlayerId-2", "fake-active-id"),
-      );
+      await b.evaluate(() => localStorage.setItem("unoPlayerId-2", "fake-active-id"));
       await b.close();
       // Wait past STALE_MS so b's heartbeat is pruned from a's table.
       await new Promise((r) => setTimeout(r, 4500));
@@ -539,9 +486,7 @@ describe("Slot allocation", () => {
       expect(await getSlot(c)).toBe(2);
       // The leftover identity is wiped because origin='elected' for C —
       // otherwise C would auto-reconnect as the closed tab's user.
-      const idAfter = await c.evaluate(() =>
-        localStorage.getItem("unoPlayerId-2"),
-      );
+      const idAfter = await c.evaluate(() => localStorage.getItem("unoPlayerId-2"));
       expect(idAfter).toBeNull();
 
       await a.close();
@@ -567,10 +512,9 @@ describe("Slot allocation", () => {
       // Reload b (preserves sessionStorage.unoSlot=2). Should keep slot 2
       // and NOT wipe the playerId.
       await b.reload();
-      await b.waitForFunction(
-        () => Number(sessionStorage.getItem("unoSlot")) > 0,
-        { timeout: 5000 },
-      );
+      await b.waitForFunction(() => Number(sessionStorage.getItem("unoSlot")) > 0, {
+        timeout: 5000,
+      });
       expect(await getSlot(b)).toBe(2);
       const id = await b.evaluate(() => localStorage.getItem("unoPlayerId-2"));
       expect(id).toBe("real-id");

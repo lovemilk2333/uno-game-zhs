@@ -20,9 +20,9 @@ function makeStringNode(key, val) {
   const totalLen = headLen + padding + vBuf.length;
 
   const node = Buffer.alloc(totalLen);
-  node.writeUInt16LE(totalLen, 0);          // wLength
-  node.writeUInt16LE(vBuf.length / 2, 2);   // wValueLength (in WCHARs)
-  node.writeUInt16LE(1, 4);                 // wType = text
+  node.writeUInt16LE(totalLen, 0); // wLength
+  node.writeUInt16LE(vBuf.length / 2, 2); // wValueLength (in WCHARs)
+  node.writeUInt16LE(1, 4); // wType = text
   kBuf.copy(node, 6);
   vBuf.copy(node, headLen + padding);
   return node;
@@ -109,7 +109,9 @@ export async function syncExeVersion(exePath) {
   newBlock.copy(data, nodeOffset);
 
   await fs.writeFile(exePath, data);
-  console.log(`[SUCCESS] Disjoint twin-node alignment fully synced. Total ${originalNodeLen} bytes balanced.`);
+  console.log(
+    `[SUCCESS] Disjoint twin-node alignment fully synced. Total ${originalNodeLen} bytes balanced.`,
+  );
 }
 
 if (import.meta.main) {
@@ -121,4 +123,3 @@ if (import.meta.main) {
     process.exit(1);
   }
 }
-

@@ -12,10 +12,6 @@
     "test:integration": "vitest run test/integration.test.js",
     "test:watch": "vitest"
   },
-  "keywords": [],
-  "author": "miruku (lovemilk)",
-  "license": "BSD-3-Clause",
-  "description": "UNO Game Server",
   "dependencies": {
     "ws": "^8.21.0"
   },
@@ -36,8 +32,16 @@
     "vitest": "^4.1.7",
     "zx": "8.8.5-lite"
   },
-  "main": "dist/server.cjs",
-  "bin": "dist/server.cjs",
+  "pefile": {
+    "version-info": {
+      "CompanyName": "miruku (lovemilk)",
+      "ProductName": "UNO Game Server",
+      "LegalCopyright": "Copyright (C) 2026 miruku (lovemilk), BSD 3-Clause License",
+      "FileDescription": "UNO Game Server",
+      "OriginalFilename": "uno-server.exe",
+      "InternalName": "uno-server"
+    }
+  },
   "pkg": {
     "scripts": [
       "dist/server.cjs"
@@ -49,15 +53,5 @@
       "dist/aiplayer.js",
       "dist/icons"
     ]
-  },
-  "pefile": {
-    "version-info": {
-      "CompanyName": "miruku (lovemilk)",
-      "ProductName": "UNO Game Server",
-      "LegalCopyright": "Copyright (C) 2026 miruku (lovemilk), BSD 3-Clause License",
-      "FileDescription": "UNO Game Server",
-      "OriginalFilename": "uno-server.exe",
-      "InternalName": "uno-server"
-    }
   }
 }

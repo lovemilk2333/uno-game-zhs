@@ -4,15 +4,15 @@
 
 ## 技术栈
 
-| 组件 | 协议 |
-|------|------|
-| TypeScript | Apache-2.0 |
-| ws (WebSocket) | MIT |
-| pkg | MIT |
-| Blobmoji SVG | MIT |
-| Vitest | MIT |
-| Playwright | Apache-2.0 |
-| tsx | MIT |
+| 组件           | 协议       |
+| -------------- | ---------- |
+| TypeScript     | Apache-2.0 |
+| ws (WebSocket) | MIT        |
+| pkg            | MIT        |
+| Blobmoji SVG   | MIT        |
+| Vitest         | MIT        |
+| Playwright     | Apache-2.0 |
+| tsx            | MIT        |
 
 ## 快速开始
 
@@ -35,11 +35,14 @@ pnpm start        # http://localhost:3000
 
 1. 安装 Github CLI
 2. 初始化 Github CLI
+
 ```sh
 gh auth login  # 登录 GitHub
 gh repo set-default # 选择您的仓库
 ```
+
 3. 运行发布新版本脚本
+
 ```sh
 ./release.sh
 ```

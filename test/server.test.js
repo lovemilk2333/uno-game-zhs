@@ -87,11 +87,7 @@ describe("UNO Server", () => {
 
     function checkStartGame(lobbyId) {
       const lobby = lobbies.get(lobbyId);
-      if (
-        lobby &&
-        lobby.players.length > 1 &&
-        lobby.players.every((p) => p.ready)
-      ) {
+      if (lobby && lobby.players.length > 1 && lobby.players.every((p) => p.ready)) {
         startGame(lobbyId);
       }
     }
@@ -120,21 +116,7 @@ describe("UNO Server", () => {
       const lobby = lobbies.get(lobbyId);
       if (!lobby) return;
       const colors = ["red", "yellow", "green", "blue"];
-      const types = [
-        "0",
-        "1",
-        "2",
-        "3",
-        "4",
-        "5",
-        "6",
-        "7",
-        "8",
-        "9",
-        "skip",
-        "reverse",
-        "draw2",
-      ];
+      const types = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "skip", "reverse", "draw2"];
       for (const color of colors) {
         for (const type of types) {
           lobby.game.deck.push({ color, type });
@@ -152,22 +134,16 @@ describe("UNO Server", () => {
       if (!lobby) return;
       for (let i = lobby.game.deck.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
-        [lobby.game.deck[i], lobby.game.deck[j]] = [
-          lobby.game.deck[j],
-          lobby.game.deck[i],
-        ];
+        [lobby.game.deck[i], lobby.game.deck[j]] = [lobby.game.deck[j], lobby.game.deck[i]];
       }
     }
 
     function uuidv4() {
-      return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(
-        /[xy]/g,
-        function (c) {
-          var r = (Math.random() * 16) | 0,
-            v = c == "x" ? r : (r & 0x3) | 0x8;
-          return v.toString(16);
-        },
-      );
+      return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
+        var r = (Math.random() * 16) | 0,
+          v = c == "x" ? r : (r & 0x3) | 0x8;
+        return v.toString(16);
+      });
     }
 
     function sanitizePlayers(players) {
@@ -188,14 +164,10 @@ describe("UNO Server", () => {
         player.hand = lobby.game.deck.splice(0, 7);
         player.uno = false;
       }
-      let idx = lobby.game.deck.findIndex(
-        (c) => c.type !== "wild" && c.type !== "wild4",
-      );
+      let idx = lobby.game.deck.findIndex((c) => c.type !== "wild" && c.type !== "wild4");
       if (idx === -1) {
         shuffleDeck(lobbyId);
-        idx = lobby.game.deck.findIndex(
-          (c) => c.type !== "wild" && c.type !== "wild4",
-        );
+        idx = lobby.game.deck.findIndex((c) => c.type !== "wild" && c.type !== "wild4");
       }
       lobby.game.discardPile.push(lobby.game.deck.splice(idx, 1)[0]);
       for (const [client, meta] of clients) {
@@ -239,8 +211,7 @@ describe("UNO Server", () => {
       if (!lobby) return;
       broadcastToLobby(lobbyId, { action: "game_aborted" }, excludePlayerId);
       for (const [client, meta] of clients) {
-        if (meta.lobbyId === lobbyId && meta.id !== excludePlayerId)
-          meta.lobbyId = null;
+        if (meta.lobbyId === lobbyId && meta.id !== excludePlayerId) meta.lobbyId = null;
       }
       lobby.players = [];
       lobby.game = {
@@ -264,11 +235,7 @@ describe("UNO Server", () => {
 
     function checkStartGame(lobbyId) {
       const lobby = lobbies.get(lobbyId);
-      if (
-        lobby &&
-        lobby.players.length > 1 &&
-        lobby.players.every((p) => p.ready)
-      ) {
+      if (lobby && lobby.players.length > 1 && lobby.players.every((p) => p.ready)) {
         startGame(lobbyId);
       }
     }
@@ -282,9 +249,7 @@ describe("UNO Server", () => {
       let cardIndex =
         card.type === "wild" || card.type === "wild4"
           ? player.hand.findIndex((c) => c.type === card.type)
-          : player.hand.findIndex(
-              (c) => c.color === card.color && c.type === card.type,
-            );
+          : player.hand.findIndex((c) => c.color === card.color && c.type === card.type);
       if (cardIndex < 0) return;
       player.hand.splice(cardIndex, 1);
       lobby.game.discardPile.push(card);
@@ -295,28 +260,24 @@ describe("UNO Server", () => {
       } else if (card.type === "reverse") {
         lobby.game.direction *= -1;
         lobby.game.turn =
-          (lobby.game.turn + lobby.game.direction + lobby.players.length) %
-          lobby.players.length;
+          (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
       } else if (card.type === "draw2") {
         const n =
-          (lobby.game.turn + lobby.game.direction + lobby.players.length) %
-          lobby.players.length;
+          (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
         lobby.players[n].hand.push(...drawCardsFromDeck(lobby, lobbyId, 2));
         lobby.game.turn =
           (lobby.game.turn + 2 * lobby.game.direction + lobby.players.length) %
           lobby.players.length;
       } else if (card.type === "wild4") {
         const n =
-          (lobby.game.turn + lobby.game.direction + lobby.players.length) %
-          lobby.players.length;
+          (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
         lobby.players[n].hand.push(...drawCardsFromDeck(lobby, lobbyId, 4));
         lobby.game.turn =
           (lobby.game.turn + 2 * lobby.game.direction + lobby.players.length) %
           lobby.players.length;
       } else {
         lobby.game.turn =
-          (lobby.game.turn + lobby.game.direction + lobby.players.length) %
-          lobby.players.length;
+          (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
       }
       broadcastGameUpdate(lobbyId);
       if (player.hand.length === 0) broadcastWin(lobbyId, player.name);
@@ -351,8 +312,7 @@ describe("UNO Server", () => {
 
       if (player.hand.length >= 100) {
         lobby.game.turn =
-          (lobby.game.turn + lobby.game.direction + lobby.players.length) %
-          lobby.players.length;
+          (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
         broadcastGameUpdate(lobbyId);
         return;
       }
@@ -363,8 +323,7 @@ describe("UNO Server", () => {
       }
 
       lobby.game.turn =
-        (lobby.game.turn + lobby.game.direction + lobby.players.length) %
-        lobby.players.length;
+        (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
       broadcastGameUpdate(lobbyId);
     }
 
@@ -393,9 +352,7 @@ describe("UNO Server", () => {
     httpServer.on("upgrade", (req, socket, head) => {
       const { pathname } = new URL(req.url, `http://${req.headers.host}`);
       if (pathname === "/ws") {
-        wss.handleUpgrade(req, socket, head, (ws) =>
-          wss.emit("connection", ws, req),
-        );
+        wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
       } else {
         socket.destroy();
       }
@@ -418,21 +375,15 @@ describe("UNO Server", () => {
         switch (message.action) {
           case "join": {
             meta.name = message.name;
-            if (
-              typeof message.lobbyId !== "string" ||
-              !message.lobbyId.length
-            ) {
-              ws.send(
-                JSON.stringify({ action: "error", message: "请提供大厅名称" }),
-              );
+            if (typeof message.lobbyId !== "string" || !message.lobbyId.length) {
+              ws.send(JSON.stringify({ action: "error", message: "请提供大厅名称" }));
               return;
             }
             let lobby = findOrCreateLobby(message.lobbyId);
             if (startedLobbies.has(lobby.id)) {
               const disconnectedPlayer = lobby.players.find(
                 (p) =>
-                  p.disconnected &&
-                  p.name.toLowerCase() === (message.name || "").toLowerCase(),
+                  p.disconnected && p.name.toLowerCase() === (message.name || "").toLowerCase(),
               );
               if (disconnectedPlayer) {
                 disconnectedPlayer.disconnected = false;
@@ -470,18 +421,11 @@ describe("UNO Server", () => {
               );
               return;
             }
-            if (
-              lobby.players.some(
-                (p) => p.name.toLowerCase() === message.name.toLowerCase(),
-              )
-            ) {
+            if (lobby.players.some((p) => p.name.toLowerCase() === message.name.toLowerCase())) {
               const existing = lobby.players.find(
                 (p) => p.name.toLowerCase() === message.name.toLowerCase(),
               );
-              if (
-                existing &&
-                (existing.id === message.playerId || existing.disconnected)
-              ) {
+              if (existing && (existing.id === message.playerId || existing.disconnected)) {
                 existing.disconnected = false;
                 existing.reconnectDeadline = null;
                 meta.name = existing.name;
@@ -519,9 +463,7 @@ describe("UNO Server", () => {
           case "ready": {
             const lobby = lobbies.get(meta.lobbyId);
             if (!lobby) {
-              ws.send(
-                JSON.stringify({ action: "error", message: "not in lobby" }),
-              );
+              ws.send(JSON.stringify({ action: "error", message: "not in lobby" }));
               return;
             }
             let player = lobby.players.find((p) => p.id === meta.id);
@@ -552,9 +494,7 @@ describe("UNO Server", () => {
               return;
             }
             if (startedLobbies.has(lobby.id)) {
-              ws.send(
-                JSON.stringify({ action: "error", message: "对局已开始" }),
-              );
+              ws.send(JSON.stringify({ action: "error", message: "对局已开始" }));
               return;
             }
             let idx = 1;
@@ -581,13 +521,9 @@ describe("UNO Server", () => {
               );
               return;
             }
-            const ai = lobby.players.find(
-              (pl) => pl.id === message.playerId && pl.isAI,
-            );
+            const ai = lobby.players.find((pl) => pl.id === message.playerId && pl.isAI);
             if (!ai) {
-              ws.send(
-                JSON.stringify({ action: "error", message: "AI 玩家未找到" }),
-              );
+              ws.send(JSON.stringify({ action: "error", message: "AI 玩家未找到" }));
               return;
             }
             ai.ready = !ai.ready;
@@ -608,18 +544,12 @@ describe("UNO Server", () => {
               return;
             }
             if (startedLobbies.has(lobby.id)) {
-              ws.send(
-                JSON.stringify({ action: "error", message: "对局已开始" }),
-              );
+              ws.send(JSON.stringify({ action: "error", message: "对局已开始" }));
               return;
             }
-            const idx = lobby.players.findIndex(
-              (pl) => pl.id === message.playerId && pl.isAI,
-            );
+            const idx = lobby.players.findIndex((pl) => pl.id === message.playerId && pl.isAI);
             if (idx === -1) {
-              ws.send(
-                JSON.stringify({ action: "error", message: "AI 玩家未找到" }),
-              );
+              ws.send(JSON.stringify({ action: "error", message: "AI 玩家未找到" }));
               return;
             }
             lobby.players.splice(idx, 1);
@@ -628,9 +558,7 @@ describe("UNO Server", () => {
           }
           case "play":
             if (!lobbies.has(meta.lobbyId)) {
-              ws.send(
-                JSON.stringify({ action: "error", message: "房间不存在" }),
-              );
+              ws.send(JSON.stringify({ action: "error", message: "房间不存在" }));
               return;
             }
             handlePlay(meta.lobbyId, meta.id, message.card);
@@ -666,9 +594,7 @@ describe("UNO Server", () => {
               return;
             }
             meta.name = session.name;
-            const existingPlayer = rLobby.players.find(
-              (p) => p.id === message.playerId,
-            );
+            const existingPlayer = rLobby.players.find((p) => p.id === message.playerId);
             if (!existingPlayer) {
               const newId = uuidv4();
               meta.id = newId;
@@ -732,18 +658,14 @@ describe("UNO Server", () => {
           }
           case "draw":
             if (!lobbies.has(meta.lobbyId)) {
-              ws.send(
-                JSON.stringify({ action: "error", message: "房间不存在" }),
-              );
+              ws.send(JSON.stringify({ action: "error", message: "房间不存在" }));
               return;
             }
             handleDraw(meta.lobbyId, meta.id);
             return;
           case "leave":
             if (!lobbies.has(meta.lobbyId)) {
-              ws.send(
-                JSON.stringify({ action: "error", message: "房间不存在" }),
-              );
+              ws.send(JSON.stringify({ action: "error", message: "房间不存在" }));
               return;
             }
             handleLeave(meta.lobbyId, meta.id);
@@ -751,9 +673,7 @@ describe("UNO Server", () => {
           case "surrender": {
             const sLobby = lobbies.get(meta.lobbyId);
             if (!sLobby || !sLobby.game.started) return;
-            const surrenderPlayer = sLobby.players.find(
-              (p) => p.id === meta.id,
-            );
+            const surrenderPlayer = sLobby.players.find((p) => p.id === meta.id);
             if (!surrenderPlayer) return;
             const winner =
               sLobby.players.find((p) => p.id !== meta.id && !p.isAI) ||
@@ -813,9 +733,7 @@ describe("UNO Server", () => {
               player.disconnected = true;
               if (lobby.game.turn === lobby.players.indexOf(player)) {
                 lobby.game.turn =
-                  (lobby.game.turn +
-                    lobby.game.direction +
-                    lobby.players.length) %
+                  (lobby.game.turn + lobby.game.direction + lobby.players.length) %
                   lobby.players.length;
               }
               broadcastPlayers(meta.lobbyId);
@@ -1042,9 +960,7 @@ describe("UNO Server", () => {
     await b.next();
 
     const topCard = s1.discardPile[0];
-    const matching = s1.hand.find(
-      (c) => c.color === topCard.color || c.type === topCard.type,
-    );
+    const matching = s1.hand.find((c) => c.color === topCard.color || c.type === topCard.type);
     if (matching) {
       send(a.ws, { action: "play", card: matching });
       const u = await a.next();
@@ -1390,9 +1306,7 @@ describe("UNO Server", () => {
     const rejoinState = await a2.next();
     expect(rejoinState.action).toBe("start");
     expect(rejoinState.hand.length).toBe(aliceHandSize);
-    expect(lobby.players.find((p) => p.id === aliceId).disconnected).toBe(
-      false,
-    );
+    expect(lobby.players.find((p) => p.id === aliceId).disconnected).toBe(false);
     a2.close();
     b.close();
   });

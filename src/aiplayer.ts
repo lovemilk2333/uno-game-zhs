@@ -19,10 +19,9 @@ export interface Lobby {
 }
 
 export type AIMove =
-  | { type: 'play'; card: Card }
-  | { type: 'play_multiple'; cards: Card[] }
-  | { type: 'draw' };
-
+  | { type: "play"; card: Card }
+  | { type: "play_multiple"; cards: Card[] }
+  | { type: "draw" };
 
 function chooseBestColor(hand: Card[]): string {
   const counts: Record<string, number> = { red: 0, yellow: 0, green: 0, blue: 0 };
@@ -37,12 +36,14 @@ function chooseBestColor(hand: Card[]): string {
 export function decideMove(lobby: Lobby): AIMove {
   const player = lobby.players[lobby.game.turn];
   const hand = player.hand;
-  if (!hand) return { type: 'draw' };
+  if (!hand) return { type: "draw" };
   const topCard = lobby.game.discardPile[lobby.game.discardPile.length - 1];
 
-  const playable = hand.filter(c =>
-    c.type !== 'wild' && c.type !== 'wild4' &&
-    (c.color === topCard.color || c.type === topCard.type)
+  const playable = hand.filter(
+    (c) =>
+      c.type !== "wild" &&
+      c.type !== "wild4" &&
+      (c.color === topCard.color || c.type === topCard.type),
   );
 
   if (playable.length > 0) {
@@ -54,25 +55,25 @@ export function decideMove(lobby: Lobby): AIMove {
 
     const entries = Object.entries(byType);
     entries.sort((a, b) => {
-      const aHasColor = a[1].some(c => c.color === topCard.color) ? 1 : 0;
-      const bHasColor = b[1].some(c => c.color === topCard.color) ? 1 : 0;
+      const aHasColor = a[1].some((c) => c.color === topCard.color) ? 1 : 0;
+      const bHasColor = b[1].some((c) => c.color === topCard.color) ? 1 : 0;
       if (aHasColor !== bHasColor) return bHasColor - aHasColor;
       return b[1].length - a[1].length;
     });
 
     const cardsToPlay = entries[0][1];
     if (cardsToPlay.length > 1) {
-      return { type: 'play_multiple', cards: cardsToPlay };
+      return { type: "play_multiple", cards: cardsToPlay };
     }
-    return { type: 'play', card: { ...cardsToPlay[0] } };
+    return { type: "play", card: { ...cardsToPlay[0] } };
   }
 
-  const wilds = hand.filter(c => c.type === 'wild' || c.type === 'wild4');
+  const wilds = hand.filter((c) => c.type === "wild" || c.type === "wild4");
   if (wilds.length > 0) {
-    const wild = wilds.find(c => c.type === 'wild') || wilds[0];
+    const wild = wilds.find((c) => c.type === "wild") || wilds[0];
     const color = chooseBestColor(hand);
-    return { type: 'play', card: { ...wild, color } };
+    return { type: "play", card: { ...wild, color } };
   }
 
-  return { type: 'draw' };
+  return { type: "draw" };
 }

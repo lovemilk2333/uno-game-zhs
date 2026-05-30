@@ -17,14 +17,10 @@ const PORT = 3002;
 let serverProcess;
 
 beforeAll(async () => {
-  serverProcess = fork(
-    path.resolve("./dist/server.cjs"),
-    ["--port", String(PORT)],
-    {
-      env: { ...process.env, NODE_ENV: "development" },
-      silent: true,
-    },
-  );
+  serverProcess = fork(path.resolve("./dist/server.cjs"), ["--port", String(PORT)], {
+    env: { ...process.env, NODE_ENV: "development" },
+    silent: true,
+  });
   await new Promise((r) => setTimeout(r, 1500));
 });
 
@@ -47,9 +43,7 @@ async function openClient() {
       buffer.push(msg);
       while (waiters.length && buffer.length) {
         const w = waiters[0];
-        const idx = w.action
-          ? buffer.findIndex((m) => m.action === w.action)
-          : 0;
+        const idx = w.action ? buffer.findIndex((m) => m.action === w.action) : 0;
         if (idx === -1) break;
         const found = buffer.splice(idx, 1)[0];
         waiters.shift();
@@ -62,9 +56,7 @@ async function openClient() {
         return new Promise((res, rej) => {
           // Drain buffered first.
           if (buffer.length) {
-            const idx = action
-              ? buffer.findIndex((m) => m.action === action)
-              : 0;
+            const idx = action ? buffer.findIndex((m) => m.action === action) : 0;
             if (idx !== -1) {
               const found = buffer.splice(idx, 1)[0];
               return res(found);
@@ -129,10 +121,7 @@ describe("Chain-drawing rules (bug #2 / #3)", () => {
   it("skip card breaks a chain by paying the penalty (chain mode)", async () => {
     // The bug was that `skip`/`reverse` silently zeroed `drawingCount` —
     // the breaker got off scot-free. Now they must absorb the penalty.
-    const { a, b, startA } = await startTwoPlayerGame(
-      "chain-skip-" + Date.now(),
-      {},
-    );
+    const { a, b, startA } = await startTwoPlayerGame("chain-skip-" + Date.now(), {});
     const turnSocket = whoseTurn(startA, a, b);
     const offSocket = turnSocket === a ? b : a;
     const top = startA.discardPile[startA.discardPile.length - 1];
@@ -168,9 +157,7 @@ describe("Chain-drawing rules (bug #2 / #3)", () => {
   });
 
   it("reverse card breaks a chain by paying the penalty (chain mode)", async () => {
-    const { a, b, startA } = await startTwoPlayerGame(
-      "chain-rev-" + Date.now(),
-    );
+    const { a, b, startA } = await startTwoPlayerGame("chain-rev-" + Date.now());
     const turnSocket = whoseTurn(startA, a, b);
     const top = startA.discardPile[startA.discardPile.length - 1];
     turnSocket.send({ action: "dev_clear_hand" });
@@ -196,9 +183,7 @@ describe("Chain-drawing rules (bug #2 / #3)", () => {
   });
 
   it("regular number card breaks chain by paying penalty (chain mode)", async () => {
-    const { a, b, startA } = await startTwoPlayerGame(
-      "chain-num-" + Date.now(),
-    );
+    const { a, b, startA } = await startTwoPlayerGame("chain-num-" + Date.now());
     const turnSocket = whoseTurn(startA, a, b);
     const top = startA.discardPile[startA.discardPile.length - 1];
     turnSocket.send({ action: "dev_clear_hand" });
@@ -223,9 +208,7 @@ describe("Chain-drawing rules (bug #2 / #3)", () => {
     // Bug #2: the server already broke the chain via wild cards but the
     // CLIENT didn't show a confirm. Server-side correctness is still
     // worth covering — a wild *must* trigger penalty in chain mode.
-    const { a, b, startA } = await startTwoPlayerGame(
-      "chain-wild-" + Date.now(),
-    );
+    const { a, b, startA } = await startTwoPlayerGame("chain-wild-" + Date.now());
     const turnSocket = whoseTurn(startA, a, b);
     turnSocket.send({ action: "dev_clear_hand" });
     await turnSocket.next("update");
@@ -244,9 +227,7 @@ describe("Chain-drawing rules (bug #2 / #3)", () => {
   });
 
   it("draw2 extends the chain instead of paying it (chain mode)", async () => {
-    const { a, b, startA } = await startTwoPlayerGame(
-      "chain-extend-" + Date.now(),
-    );
+    const { a, b, startA } = await startTwoPlayerGame("chain-extend-" + Date.now());
     const turnSocket = whoseTurn(startA, a, b);
     const offSocket = turnSocket === a ? b : a;
     const top = startA.discardPile[startA.discardPile.length - 1];
@@ -277,10 +258,9 @@ describe("Chain-drawing rules (bug #2 / #3)", () => {
 
 describe("Direct draw mode", () => {
   it("draw2 in direct mode immediately deals 2 to next player", async () => {
-    const { a, b, startA } = await startTwoPlayerGame(
-      "direct-d2-" + Date.now(),
-      { drawMode: "direct" },
-    );
+    const { a, b, startA } = await startTwoPlayerGame("direct-d2-" + Date.now(), {
+      drawMode: "direct",
+    });
     const turnSocket = whoseTurn(startA, a, b);
     const offSocket = turnSocket === a ? b : a;
     const top = startA.discardPile[startA.discardPile.length - 1];
@@ -292,9 +272,7 @@ describe("Direct draw mode", () => {
     });
     const giveUpdate = await turnSocket.next("update");
     const offId = startA.players[(startA.turn + 1) % startA.players.length].id;
-    const offCardsBefore = giveUpdate.players.find(
-      (p) => p.id === offId,
-    ).cardCount;
+    const offCardsBefore = giveUpdate.players.find((p) => p.id === offId).cardCount;
 
     turnSocket.send({
       action: "play",
@@ -316,9 +294,7 @@ describe("Direct draw mode", () => {
 
 describe("Turn timeout broadcast (task #5)", () => {
   it("broadcasts a turnDeadline on the start frame", async () => {
-    const { a, b, startA, startB } = await startTwoPlayerGame(
-      "timeout-deadline-" + Date.now(),
-    );
+    const { a, b, startA, startB } = await startTwoPlayerGame("timeout-deadline-" + Date.now());
     expect(typeof startA.turnDeadline).toBe("number");
     expect(typeof startB.turnDeadline).toBe("number");
     // Deadline is in the near future (within 60s of now).
@@ -329,9 +305,7 @@ describe("Turn timeout broadcast (task #5)", () => {
   });
 
   it("updates the deadline on each turn change", async () => {
-    const { a, b, startA } = await startTwoPlayerGame(
-      "timeout-refresh-" + Date.now(),
-    );
+    const { a, b, startA } = await startTwoPlayerGame("timeout-refresh-" + Date.now());
     const turnSocket = whoseTurn(startA, a, b);
     const top = startA.discardPile[startA.discardPile.length - 1];
     turnSocket.send({
@@ -355,14 +329,10 @@ describe("Turn timeout broadcast (task #5)", () => {
   // turn instance, not the live socket — a reconnect within the same
   // turn must resume the existing budget, not mint a fresh one.
   it("reconnect within the same turn does NOT reset the deadline", async () => {
-    const { a, b, startA } = await startTwoPlayerGame(
-      "timeout-refresh-exploit-" + Date.now(),
-    );
+    const { a, b, startA } = await startTwoPlayerGame("timeout-refresh-exploit-" + Date.now());
     const turnSocket = whoseTurn(startA, a, b);
     const turnIsA = turnSocket === a;
-    const turnPlayerId = turnIsA
-      ? startA.id
-      : startA.players.find((p) => p.id !== startA.id).id;
+    const turnPlayerId = turnIsA ? startA.id : startA.players.find((p) => p.id !== startA.id).id;
 
     const initialDeadline = startA.turnDeadline;
     expect(typeof initialDeadline).toBe("number");
@@ -404,9 +374,7 @@ describe("Server validates dev events (task #8)", () => {
     // Pause: the broadcast `update` flips `turnTimerPaused: true` and
     // the deadline stops advancing while paused. Resume: re-arms with
     // the remaining time so the user gets the time-back-when-paused.
-    const { a, b, startA } = await startTwoPlayerGame(
-      "dev-pause-" + Date.now(),
-    );
+    const { a, b, startA } = await startTwoPlayerGame("dev-pause-" + Date.now());
     const turnSocket = whoseTurn(startA, a, b);
     const initialDeadline = startA.turnDeadline;
     expect(typeof initialDeadline).toBe("number");
