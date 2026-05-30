@@ -1,6 +1,12 @@
 {
   "name": "uno",
   "version": "0.1.0.12",
+  "description": "UNO Game Server",
+  "keywords": [],
+  "license": "BSD-3-Clause",
+  "author": "miruku (lovemilk)",
+  "bin": "dist/server.cjs",
+  "main": "dist/server.cjs",
   "scripts": {
     "build": "pnpm tsdown && pnpm tsdown --no-config --no-clean --format cjs --target chrome76 ./src/client.ts",
     "start": "node dist/server.cjs",
