@@ -70,6 +70,7 @@ interface ServerMessage {
   log?: object[];
   turnDeadline?: number | null;
   turnTimerPaused?: boolean;
+  chatHistory?: Array<{ playerId: string; type: "emoji" | "text"; content: string }>;
 }
 
 let NAME_LENGTH_MIN = 2;
@@ -1108,6 +1109,11 @@ function connect(): void {
         // Start watching scroll so the sticky header collapses into the
         // compact docked bar once the user scrolls down into their hand.
         ensureStickyHeaderWatcher();
+        // Restore the chat/reaction history the server kept for this game
+        // (so a reconnecting player gets back the messages they missed).
+        if (Array.isArray(message.chatHistory)) {
+          restoreReactionHistory(message.chatHistory);
+        }
         break;
 
       case "update":
@@ -1740,6 +1746,13 @@ function resetGameState(): void {
 
     // Clear players list
     playersList.innerHTML = "";
+
+    // Clear the persistent chat/reaction history so a new game starts
+    // with a blank log instead of carrying the previous game's messages.
+    const reactionHistory = document.getElementById("reaction-history");
+    if (reactionHistory) reactionHistory.innerHTML = "";
+    const reactionHistoryBox = document.getElementById("reaction-history-box");
+    if (reactionHistoryBox) reactionHistoryBox.classList.remove("has-messages");
 
     // Reset turn indicator
     setTurnLabelText("Waiting for game to start...");
@@ -2534,6 +2547,16 @@ document.addEventListener("DOMContentLoaded", () => {
   reactionTextInput.addEventListener("keydown", (e: KeyboardEvent) => {
     if (e.key === "Enter") sendReactionText();
   });
+
+  // Collapse / expand the chat history box.
+  const historyToggle = document.getElementById("reaction-history-toggle");
+  const historyBox = document.getElementById("reaction-history-box");
+  if (historyToggle && historyBox) {
+    historyToggle.addEventListener("click", () => {
+      const collapsed = historyBox.classList.toggle("collapsed");
+      historyToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    });
+  }
 
   // Save name/lobby ID to localStorage on each keystroke
   nameInput.addEventListener("input", () => {
@@ -3362,25 +3385,57 @@ function diffCardCountsForPenaltyPopup(prev: Player[], next: Player[]): void {
 }
 
 function spawnPenaltyPopup(playerId: string, delta: number): void {
-  // After the merged turn-order layout, every player (including self)
-  // has a tile in #opponent-hands, so there's exactly one place to
-  // anchor the popup. We still fall back to the turn-indicator if
-  // the tile happens not to exist (e.g. spectator-only edge cases).
+  // The +N floats over the player's tile, but it lives in #popup-layer
+  // (a body-level fixed overlay) rather than inside the tile. That keeps
+  // it OUT of #opponent-hands' stacking context (which is pinned below
+  // the turn-indicator so the indicator's pulse isn't clipped), letting
+  // the popup carry its own high z-index and render above everything.
   const playerDiv = opponentHandsDiv.querySelector(
     `[data-player-id="${playerId}"]`,
   ) as HTMLDivElement | null;
+  const anchor =
+    playerDiv || (document.getElementById("turn-indicator") as HTMLElement | null);
+  if (!anchor) return;
   const popup = document.createElement("div");
   popup.classList.add("penalty-popup");
   popup.textContent = `+${delta}`;
-  if (playerDiv) {
-    playerDiv.appendChild(popup);
-  } else {
-    const target = document.getElementById("turn-indicator");
-    if (target) target.appendChild(popup);
-    else return;
-  }
+  mountFloatingPopup(popup, anchor, "right");
   // 5s total animation = 0.4s rise + 4.2s linger + 0.4s fade.
   setTimeout(() => popup.remove(), 5200);
+}
+
+// Mounts a transient floating popup (reaction / +N) into #popup-layer,
+// positioned over `anchor`. The layer is a fixed, full-viewport overlay,
+// so we anchor against the anchor's viewport rect. When the header is
+// collapsed the player tiles are docked at the very top, so the popup
+// drops DOWNWARD (anchored to the tile bottom) to stay on-screen;
+// otherwise it floats UP from the tile top. `align` controls horizontal
+// placement: "center" (reactions) or "right" (the +N badge).
+function mountFloatingPopup(
+  popup: HTMLElement,
+  anchor: HTMLElement,
+  align: "center" | "right",
+): void {
+  const layer = document.getElementById("popup-layer");
+  if (!layer) return;
+  const rect = anchor.getBoundingClientRect();
+  const collapsed = document.body.classList.contains("header-collapsed");
+  popup.style.position = "absolute";
+  if (align === "center") {
+    popup.style.left = `${Math.round(rect.left + rect.width / 2)}px`;
+  } else {
+    // Near the tile's right edge (mirrors the old `right: 8px`).
+    popup.style.left = `${Math.round(rect.right - 8)}px`;
+  }
+  if (collapsed) {
+    popup.classList.add("popup-down");
+    popup.style.top = `${Math.round(rect.bottom)}px`;
+  } else {
+    // Anchor the popup's bottom at the tile's top so it sits above it,
+    // then the keyframes float it further up.
+    popup.style.bottom = `${Math.round(window.innerHeight - rect.top)}px`;
+  }
+  layer.appendChild(popup);
 }
 
 function showReaction(playerId: string, type: string, content: string): void {
@@ -3406,8 +3461,6 @@ function showReaction(playerId: string, type: string, content: string): void {
       "🔥": "fire",
     };
 
-    // ── Logging ──────────────────────────────────────────────
-    const CLIENT_PREFIX = "[client]";
     const icon = iconMap[content] || "laugh";
     popup.innerHTML = `<img src="/icons/${icon}.svg" style="width:32px;height:32px;">`;
   }
@@ -3431,9 +3484,10 @@ function showReaction(playerId: string, type: string, content: string): void {
   popup.style.animationDuration = duration + "s";
 
   if (playerDiv) {
-    playerDiv.appendChild(popup);
+    mountFloatingPopup(popup, playerDiv, "center");
   } else {
-    // Self reaction: show above reaction bar
+    // Self reaction: show above the reaction bar (at the page bottom, not
+    // trapped by #opponent-hands, so a plain absolute anchor is fine).
     const reactionBar = document.getElementById("reaction-bar");
     if (reactionBar) {
       popup.style.position = "absolute";
@@ -3498,6 +3552,10 @@ function appendReactionHistory(playerId: string, type: string, content: string):
   row.appendChild(contentEl);
   box.appendChild(row);
 
+  // Reveal the (otherwise hidden) history box now that it has content.
+  const boxWrap = document.getElementById("reaction-history-box");
+  if (boxWrap) boxWrap.classList.add("has-messages");
+
   // Trim to cap.
   while (box.children.length > REACTION_HISTORY_MAX) {
     box.removeChild(box.firstChild!);
@@ -3507,6 +3565,25 @@ function appendReactionHistory(playerId: string, type: string, content: string):
   // they scrolled up to read backlog we shouldn't yank them down.
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
   if (nearBottom) box.scrollTop = box.scrollHeight;
+}
+
+// Rebuild the chat history pane from a server-provided list (sent in the
+// reconnect `start` payload). Replaces any existing rows so reconnects
+// don't duplicate entries, and does NOT spawn the floating popups — these
+// are old messages, not live ones. Auto-scrolls to the newest entry.
+function restoreReactionHistory(
+  entries: Array<{ playerId: string; type: "emoji" | "text"; content: string }>,
+): void {
+  const box = document.getElementById("reaction-history");
+  if (!box) return;
+  box.innerHTML = "";
+  const boxWrap = document.getElementById("reaction-history-box");
+  if (boxWrap) boxWrap.classList.remove("has-messages");
+  for (const e of entries) {
+    if (!e || typeof e.content !== "string") continue;
+    appendReactionHistory(e.playerId, e.type, e.content);
+  }
+  box.scrollTop = box.scrollHeight;
 }
 
 gameOverBtn.addEventListener("click", () => {

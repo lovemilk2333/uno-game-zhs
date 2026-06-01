@@ -405,7 +405,7 @@ h1 {
        even on tabs without sticky support. */
   position: sticky;
   top: 8px;
-  z-index: 50;
+  z-index: 55;
   padding: 15px 30px;
   border-radius: 15px;
   text-align: center;
@@ -1000,7 +1000,10 @@ body.header-collapsed #turn-timer {
 @media (prefers-reduced-motion: reduce) {
   #opponent-hands,
   #opponent-hands::before,
-  body.header-collapsed #turn-indicator {
+  body.header-collapsed #turn-indicator,
+  #reaction-history,
+  #reaction-history-toggle,
+  #reaction-history-chevron {
     transition: none;
   }
 
@@ -1359,6 +1362,11 @@ body.header-collapsed #turn-timer {
        the gap that used to show page content scrolling between the two
        separately-pinned sticky elements. */
   top: var(--tiles-sticky-top, 80px);
+  /* Below #turn-indicator (z-55) so the indicator's `my-turn` pulse
+     (a scale-up) is never clipped by this flush-pinned neighbor. The
+     floating reaction / +N popups do NOT rely on this element's z-index:
+     they live in #popup-layer (a body-level overlay) so they can stack
+     above the indicator independently. */
   z-index: 49;
   background: rgba(30, 30, 30, 0.85);
   backdrop-filter: blur(6px);
@@ -1639,16 +1647,25 @@ body.player-action-disabled #player-hand .card.not-playable {
   color: #667eea;
 }
 
+/* Top-level overlay that hosts floating reaction / +N popups. Fixed and
+   full-viewport with no pointer events; individual popups are absolutely
+   positioned within it from JS (against their anchor tile's viewport
+   rect). A high z-index keeps every popup above the turn indicator and
+   docked header without those elements needing to be reordered. */
+#popup-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9000;
+}
+
 /* Reaction Pop-up Animation */
 .reaction-popup {
   position: absolute;
-  bottom: 100%;
-  left: 50%;
   transform: translateX(-50%);
   font-size: 2rem;
   white-space: nowrap;
   pointer-events: none;
-  z-index: 100;
   animation-name: reactionFloatUp;
   animation-timing-function: ease-out;
   animation-fill-mode: forwards;
@@ -1693,6 +1710,39 @@ body.player-action-disabled #player-hand .card.not-playable {
     opacity: 0;
     transform: translateX(-50%) translateY(-60px);
   }
+}
+
+/* Downward variant — used when the header is collapsed and the player
+   tiles are docked at the very top of the viewport. Popping UP there
+   would launch the reaction off-screen; instead it drops DOWN into the
+   visible area below the docked card. */
+@keyframes reactionFloatDown {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(0) scale(0.5);
+  }
+
+  8% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(10px) scale(1);
+  }
+
+  85% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(40px);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(60px);
+  }
+}
+
+/* When docked at the top, reaction popups are anchored to the tile's
+   BOTTOM and drop downward (the JS adds .popup-down and sets top:) so
+   they stay on-screen instead of launching past the viewport top. */
+.reaction-popup.popup-down {
+  animation-name: reactionFloatDown;
 }
 
 #opponent-hands .player.creator {
@@ -2668,8 +2718,6 @@ footer a:hover {
    penalty). Lingers for ~5s so even a glance catches it. */
 .penalty-popup {
   position: absolute;
-  top: 0;
-  right: 8px;
   pointer-events: none;
   font-size: 1.4rem;
   font-weight: 800;
@@ -2680,7 +2728,6 @@ footer a:hover {
   opacity: 0;
   transform: translateY(0);
   animation: penaltyFloat 5s ease-out forwards;
-  z-index: 30;
 }
 
 @keyframes penaltyFloat {
@@ -2709,29 +2756,134 @@ footer a:hover {
   }
 }
 
+/* Downward variant for when the header is collapsed (tiles docked at the
+   top). Floating up would push the +N off the viewport top, so it drops
+   down into view instead. */
+@keyframes penaltyFloatDown {
+  0% {
+    opacity: 0;
+    transform: translateY(0) scale(0.8);
+  }
+
+  8% {
+    opacity: 1;
+    transform: translateY(6px) scale(1.1);
+  }
+
+  16% {
+    transform: translateY(10px) scale(1);
+  }
+
+  85% {
+    opacity: 1;
+    transform: translateY(30px);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(40px);
+  }
+}
+
+/* Docked-header state: the +N is anchored to the tile bottom (JS sets
+   top:) and drops downward via .popup-down so it stays on-screen. */
+.penalty-popup.popup-down {
+  animation-name: penaltyFloatDown;
+}
+
 /* Reaction history pane — scrollable list of past chat / emojis. The
    floating popups still play on every reaction; this pane just keeps
-   the textual record so users who weren't watching can scroll back. */
-#reaction-history {
+   the textual record so users who weren't watching can scroll back.
+   Wrapped in #reaction-history-box with a collapsible header. */
+#reaction-history-box {
   width: 100%;
   max-width: 600px;
+  margin-top: 8px;
+}
+
+/* The box is empty until the first message arrives — JS adds the
+   `has-messages` class then. Hidden by default so it takes no space. */
+#reaction-history-box:not(.has-messages) {
+  display: none;
+}
+
+#reaction-history-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 4px 10px;
+  background: rgba(30, 30, 30, 0.7);
+  border: 1px solid #2d2d2d;
+  border-radius: 10px;
+  color: #a0aec0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-radius 0.25s ease;
+}
+
+#reaction-history-toggle:hover {
+  background: rgba(45, 45, 45, 0.8);
+}
+
+#reaction-history-chevron {
+  transition: transform 0.25s ease;
+  font-size: 0.7rem;
+}
+
+/* Collapsed: rotate the chevron pointing right. The list itself animates
+   shut via max-height/opacity below (not display:none, so it can
+   transition). */
+#reaction-history-box.collapsed #reaction-history-chevron {
+  transform: rotate(-90deg);
+}
+
+/* Flatten the toggle's bottom corners ONLY while the list is open, so it
+   visually connects to the list below. When collapsed (or empty) the
+   toggle is a standalone pill and keeps all four corners rounded — this
+   is what restores the bottom radius after collapsing. */
+#reaction-history-box.has-messages:not(.collapsed) #reaction-history-toggle {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+#reaction-history {
+  width: 100%;
   max-height: 140px;
   overflow-y: auto;
-  margin-top: 8px;
   padding: 6px 10px;
   background: rgba(20, 20, 20, 0.6);
   border: 1px solid #2d2d2d;
-  border-radius: 10px;
+  border-top: none;
+  border-radius: 0 0 10px 10px;
   font-size: 0.8rem;
   line-height: 1.4;
   scrollbar-width: thin;
   scrollbar-color: #4a5568 #1a1a1a;
+  /* Animate the collapse: height shrinks, content fades, padding and the
+     bottom border close up so nothing residual is left behind. */
+  transition:
+    max-height 0.25s ease,
+    opacity 0.2s ease,
+    padding-top 0.25s ease,
+    padding-bottom 0.25s ease,
+    border-bottom-width 0.25s ease;
 }
 
-#reaction-history:empty {
-  /* Hide the empty box so it doesn't take up space until someone
-       sends a reaction. */
-  display: none;
+/* Collapsed list: animate to zero height instead of display:none so the
+   open/close is smooth. overflow:hidden clips content during the
+   transition; border-bottom-width:0 avoids a leftover hairline. */
+#reaction-history-box.collapsed #reaction-history {
+  max-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-bottom-width: 0;
+  overflow: hidden;
 }
 
 #reaction-history::-webkit-scrollbar {

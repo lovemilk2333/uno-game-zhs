@@ -165,8 +165,14 @@
                  player tiles vanish after a few seconds; this list
                  keeps the last ~30 messages so users who scroll back
                  can catch up on chat they missed. Populated by client.ts
-                 inside showReaction(). -->
-        <div id="reaction-history" aria-live="polite"></div>
+                 inside showReaction(). The header toggles collapse. -->
+        <div id="reaction-history-box">
+          <button id="reaction-history-toggle" type="button" aria-expanded="true" aria-controls="reaction-history">
+            <span id="reaction-history-title">聊天记录</span>
+            <span id="reaction-history-chevron" aria-hidden="true">▾</span>
+          </button>
+          <div id="reaction-history" aria-live="polite"></div>
+        </div>
       </div>
       <div id="player-hand-area">
         <div id="card-controls">
@@ -192,6 +198,13 @@
         <button id="game-over-btn">返回大厅</button>
       </div>
     </div>
+    <!-- Top-level overlay layer for floating reaction / +N popups. Living
+         at the body level (not inside #opponent-hands, which forms its own
+         stacking context via backdrop-filter) lets the popups carry their
+         own z-index and render ABOVE the turn indicator without forcing
+         #opponent-hands above it (which would clip the indicator's pulse).
+         Popups are positioned over their anchor tile from JS. -->
+    <div id="popup-layer"></div>
     <div id="dev-panel">
       <div id="dev-panel-header">DEV <span id="dev-panel-toggle">▼</span></div>
       <div id="dev-panel-body">

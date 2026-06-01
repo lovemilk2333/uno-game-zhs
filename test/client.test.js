@@ -4216,10 +4216,11 @@ describe("UNO Client", () => {
     await ctxB.close();
   });
 
-  // +N popup must attach to a player tile that survives the next
-  // updatePlayers rebuild. Earlier code spawned the popup BEFORE the
-  // rebuild, so #opponent-hands.innerHTML='' immediately yanked the
-  // popup back out and the user never saw it.
+  // +N popup must appear (in the body-level #popup-layer) when a chain
+  // penalty is applied. Earlier code parented it inside the player tile,
+  // which got yanked out by #opponent-hands.innerHTML='' on the next
+  // updatePlayers rebuild; now it lives in a dedicated overlay layer that
+  // survives the rebuild and stacks above the turn indicator.
   it(
     "+N popup appears next to a player when chain penalty is applied",
     { timeout: 30000 },
@@ -4263,27 +4264,27 @@ describe("UNO Client", () => {
       // themselves so observer (the active player) sees a +4 popup.
       await targetPage.evaluate(() => sendMessage({ action: "dev_add_cards", count: 4 }));
 
-      // The popup is appended to the player tile. Wait for a .penalty-popup
-      // to appear inside #opponent-hands.
+      // The popup now lives in the body-level #popup-layer overlay (so it
+      // can stack above the turn indicator). Wait for it to appear there.
       await observer.waitForFunction(
         () => {
-          const popup = document.querySelector("#opponent-hands .penalty-popup");
+          const popup = document.querySelector("#popup-layer .penalty-popup");
           return !!popup && /\+\d+/.test(popup.textContent || "");
         },
         { timeout: 5000 },
       );
 
-      // Confirm the popup actually says +4 and is parented to a player tile.
+      // Confirm the popup says +N and is parented to the popup layer.
       const info = await observer.evaluate(() => {
-        const popup = document.querySelector("#opponent-hands .penalty-popup");
+        const popup = document.querySelector("#popup-layer .penalty-popup");
         const parent = popup ? popup.parentElement : null;
         return {
           text: popup ? popup.textContent : null,
-          parentIsPlayerTile: !!parent && parent.classList.contains("player"),
+          inPopupLayer: !!parent && parent.id === "popup-layer",
         };
       });
       expect(info.text).toMatch(/\+\d+/);
-      expect(info.parentIsPlayerTile).toBe(true);
+      expect(info.inPopupLayer).toBe(true);
 
       await pageA.close();
       await pageB.close();

@@ -16,6 +16,7 @@ import {
   LOBBY_ID_LENGTH_MAX,
   MAX_AI_PER_LOBBY,
   REACTION_CONTENT_MAX,
+  CHAT_HISTORY_MAX,
   WS_MAX_PAYLOAD,
   MAX_PARSE_ERRORS_PER_CONN,
   PLAY_TIMEOUT_MS,
@@ -44,9 +45,19 @@ enum LobbyGameState {
   drawing, // 连续出加牌中...
 }
 
+interface ChatEntry {
+  playerId: string;
+  type: "emoji" | "text";
+  content: string;
+}
+
 interface Lobby {
   id: string;
   players: Player[];
+  // Last N chat/reaction messages for the current game, so a reconnecting
+  // client can restore the chat history it missed. Capped at
+  // CHAT_HISTORY_MAX and cleared when a new game starts.
+  chatHistory: ChatEntry[];
   game: {
     deck: Card[];
     discardPile: Card[];
@@ -416,6 +427,7 @@ function createLobby(lobbyId: string): Lobby {
   return {
     id: lobbyId,
     players: [],
+    chatHistory: [],
     game: {
       deck: [],
       discardPile: [],
@@ -447,6 +459,21 @@ function broadcastToLobby(
       client.send(JSON.stringify(message));
     }
   });
+}
+
+// Append a chat/reaction message to the lobby's rolling history (capped at
+// CHAT_HISTORY_MAX). Used so a reconnecting client can restore the chat it
+// missed while away. Content is already validated by the caller.
+function recordChatHistory(
+  lobby: Lobby,
+  playerId: string,
+  type: "emoji" | "text",
+  content: string,
+): void {
+  lobby.chatHistory.push({ playerId, type, content });
+  if (lobby.chatHistory.length > CHAT_HISTORY_MAX) {
+    lobby.chatHistory.splice(0, lobby.chatHistory.length - CHAT_HISTORY_MAX);
+  }
 }
 
 function broadcastPlayers(lobbyId: string): void {
@@ -571,6 +598,9 @@ function startGame(lobbyId: string): void {
 
   lobby.game.started = true;
   startedLobbies.add(lobbyId);
+  // Fresh game → fresh chat log. Any messages from a previous round in
+  // this lobby shouldn't bleed into the new game's reconnect history.
+  lobby.chatHistory = [];
   createDeck(lobbyId);
   shuffleDeck(lobbyId);
   dealCards(lobbyId);
@@ -626,6 +656,7 @@ function broadcastWin(lobbyId: string, winnerName: string): void {
     if (meta.lobbyId === lobbyId) meta.lobbyId = null;
   }
   lobby.players.length = 0;
+  lobby.chatHistory = [];
   lobby.game = {
     deck: [],
     discardPile: [],
@@ -655,6 +686,7 @@ function broadcastGameAborted(lobbyId: string, excludePlayerId: string): void {
     if (meta.lobbyId === lobbyId && meta.id !== excludePlayerId) meta.lobbyId = null;
   }
   lobby.players = [];
+  lobby.chatHistory = [];
   lobby.game = {
     deck: [],
     discardPile: [],
@@ -1738,6 +1770,7 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
                   hand: player.hand,
                   turnDeadline: getTurnDeadline(session.lobbyId),
                   turnTimerPaused: isTurnTimerPaused(session.lobbyId),
+                  chatHistory: rLobby!.chatHistory,
                 }),
               );
             }
@@ -1822,6 +1855,7 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
             broadcastToLobby(lobbyId, { action: "win", winner: "" });
             for (const [, m] of clients) m.lobbyId === lobbyId && (m.lobbyId = null);
             sLobby.players = [];
+            sLobby.chatHistory = [];
             sLobby.game = {
               deck: [],
               discardPile: [],
@@ -1929,6 +1963,7 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
           if (typeof message.content !== "string" || message.content.length === 0) break;
           if (message.content.length > REACTION_CONTENT_MAX) break;
           if (message.type === "emoji") {
+            recordChatHistory(lobby, metadata.id, "emoji", message.content);
             broadcastToLobby(metadata.lobbyId!, {
               action: "reaction",
               playerId: metadata.id,
@@ -1942,6 +1977,7 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
               else width += 0.3;
             }
             if (width > 64) break;
+            recordChatHistory(lobby, metadata.id, "text", message.content);
             broadcastToLobby(metadata.lobbyId!, {
               action: "reaction",
               playerId: metadata.id,

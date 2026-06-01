@@ -22,6 +22,10 @@ export const MAX_AI_PER_LOBBY = 7;
 // Reaction (emoji / text) content cap measured in code units.
 export const REACTION_CONTENT_MAX = 256;
 
+// Number of recent chat/reaction messages the server retains per lobby for
+// the current game, so a reconnecting client can restore what it missed.
+export const CHAT_HISTORY_MAX = 32;
+
 // WebSocket payload cap. Real game messages stay under a few hundred bytes;
 // anything materially larger is either a bug or an abuse attempt.
 export const WS_MAX_PAYLOAD = 64 * 1024;
