@@ -508,25 +508,23 @@ describe("UNO Client", () => {
         { timeout: 10000 },
       );
 
-      // A should see B's card count after reconnect (game update from reconnect handler)
-      await pageA.waitForFunction(
+      // A should see B's card count after reconnect (game update from reconnect
+      // handler). Capture the matching text from inside waitForFunction so the
+      // value is read atomically when the condition holds — a separate evaluate
+      // could otherwise observe a transient name-only tile from a concurrent
+      // updatePlayers rebuild and read just "Bob".
+      const reconnectedHandle = await pageA.waitForFunction(
         () => {
           const cards = Array.from(document.querySelectorAll("#opponent-hands .player"));
-          const opp = cards.find((c) => !c.classList.contains("self"));
-          return (
-            !!opp &&
-            (opp.textContent || "").includes("张牌") &&
-            !opp.classList.contains("disconnected")
+          const opp = cards.find(
+            (c) => !c.classList.contains("self") && !c.classList.contains("disconnected"),
           );
+          const text = opp ? opp.textContent || "" : "";
+          return /（\d+ 张牌）/.test(text) ? text : false;
         },
         { timeout: 10000 },
       );
-
-      const reconnectedDisplay = await pageA.evaluate(() => {
-        const cards = Array.from(document.querySelectorAll("#opponent-hands .player"));
-        const opp = cards.find((c) => !c.classList.contains("self"));
-        return opp ? opp.textContent : "";
-      });
+      const reconnectedDisplay = await reconnectedHandle.jsonValue();
       expect(reconnectedDisplay).toMatch(/（\d+ 张牌）/);
 
       await pageA.close();
@@ -4290,6 +4288,242 @@ describe("UNO Client", () => {
       await pageB.close();
       await ctxA.close();
       await ctxB.close();
+    },
+  );
+
+  // Reaction popups must render inside the body-level #popup-layer overlay
+  // (z-index 9000) rather than inside a player tile. The old layout parented
+  // them under #opponent-hands, whose own stacking context (z-index 49, below
+  // the z-55 turn indicator) hid them behind the indicator. Living in
+  // #popup-layer lets them stack ABOVE the indicator.
+  it(
+    "reaction popup renders in #popup-layer above the turn indicator",
+    { timeout: 30000 },
+    async () => {
+      const pageA = await browser.newPage();
+      const pageB = await browser.newPage();
+      await pageA.goto(BASE);
+      await pageB.goto(BASE);
+      const lobbyId = "rpopup-" + Date.now();
+      await pageA.fill("#name", "Alice");
+      await pageA.fill("#lobby-id", lobbyId);
+      await pageA.click("#join");
+      await pageA.waitForSelector("#players li");
+      await pageB.fill("#name", "Bob");
+      await pageB.fill("#lobby-id", lobbyId);
+      await pageB.click("#join");
+      await pageA.waitForFunction(() => document.querySelectorAll("#players li").length === 2);
+      await pageA.click("#ready");
+      await pageB.click("#ready");
+      await pageA.waitForFunction(
+        () => {
+          const el = document.getElementById("game");
+          return el && el.style.display !== "none";
+        },
+        { timeout: 10000 },
+      );
+
+      // A reacts; B (the other player) sees A's reaction float over A's tile.
+      // The popup must be mounted inside #popup-layer on B's page.
+      await pageA.click('.reaction-emoji[data-emoji="🔥"]');
+      await pageB.waitForFunction(
+        () => !!document.querySelector("#popup-layer .reaction-popup"),
+        { timeout: 5000 },
+      );
+
+      const info = await pageB.evaluate(() => {
+        const popup = document.querySelector("#popup-layer .reaction-popup");
+        const parent = popup ? popup.parentElement : null;
+        const layer = document.getElementById("popup-layer");
+        const indicator = document.getElementById("turn-indicator");
+        const layerZ = layer ? parseInt(getComputedStyle(layer).zIndex || "0", 10) : 0;
+        const indicatorZ = indicator
+          ? parseInt(getComputedStyle(indicator).zIndex || "0", 10)
+          : 0;
+        return {
+          inPopupLayer: !!parent && parent.id === "popup-layer",
+          layerZ,
+          indicatorZ,
+        };
+      });
+      expect(info.inPopupLayer).toBe(true);
+      // The overlay layer must stack strictly above the turn indicator.
+      expect(info.layerZ).toBeGreaterThan(info.indicatorZ);
+
+      await pageA.close();
+      await pageB.close();
+    },
+  );
+
+  // The chat history box has a collapsible header. Clicking the toggle adds
+  // `.collapsed` to the box and flips aria-expanded; clicking again restores.
+  it(
+    "chat history box collapses and expands via its toggle",
+    { timeout: 30000 },
+    async () => {
+      const pageA = await browser.newPage();
+      const pageB = await browser.newPage();
+      await pageA.goto(BASE);
+      await pageB.goto(BASE);
+      const lobbyId = "rcoll-" + Date.now();
+      await pageA.fill("#name", "Alice");
+      await pageA.fill("#lobby-id", lobbyId);
+      await pageA.click("#join");
+      await pageA.waitForSelector("#players li");
+      await pageB.fill("#name", "Bob");
+      await pageB.fill("#lobby-id", lobbyId);
+      await pageB.click("#join");
+      await pageA.waitForFunction(() => document.querySelectorAll("#players li").length === 2);
+      await pageA.click("#ready");
+      await pageB.click("#ready");
+      await pageA.waitForFunction(
+        () => {
+          const el = document.getElementById("game");
+          return el && el.style.display !== "none";
+        },
+        { timeout: 10000 },
+      );
+
+      // The box stays hidden (no `has-messages`) until a message arrives.
+      const before = await pageA.evaluate(() => {
+        const box = document.getElementById("reaction-history-box");
+        return box ? box.classList.contains("has-messages") : null;
+      });
+      expect(before).toBe(false);
+
+      // Send a reaction so the box becomes visible.
+      await pageA.click('.reaction-emoji[data-emoji="👍"]');
+      await pageA.waitForFunction(
+        () => {
+          const box = document.getElementById("reaction-history-box");
+          return box && box.classList.contains("has-messages");
+        },
+        { timeout: 5000 },
+      );
+
+      // Toggle is expanded by default.
+      const initial = await pageA.evaluate(() => {
+        const box = document.getElementById("reaction-history-box");
+        const toggle = document.getElementById("reaction-history-toggle");
+        return {
+          collapsed: box.classList.contains("collapsed"),
+          expanded: toggle.getAttribute("aria-expanded"),
+        };
+      });
+      expect(initial.collapsed).toBe(false);
+      expect(initial.expanded).toBe("true");
+
+      // Click to collapse.
+      await pageA.click("#reaction-history-toggle");
+      const collapsed = await pageA.evaluate(() => {
+        const box = document.getElementById("reaction-history-box");
+        const toggle = document.getElementById("reaction-history-toggle");
+        return {
+          collapsed: box.classList.contains("collapsed"),
+          expanded: toggle.getAttribute("aria-expanded"),
+        };
+      });
+      expect(collapsed.collapsed).toBe(true);
+      expect(collapsed.expanded).toBe("false");
+
+      // Click again to expand.
+      await pageA.click("#reaction-history-toggle");
+      const expanded = await pageA.evaluate(() => {
+        const box = document.getElementById("reaction-history-box");
+        const toggle = document.getElementById("reaction-history-toggle");
+        return {
+          collapsed: box.classList.contains("collapsed"),
+          expanded: toggle.getAttribute("aria-expanded"),
+        };
+      });
+      expect(expanded.collapsed).toBe(false);
+      expect(expanded.expanded).toBe("true");
+
+      await pageA.close();
+      await pageB.close();
+    },
+  );
+
+  // After a game finishes the client must wipe the chat history pane (and
+  // hide the box) so the previous round's messages don't linger into the
+  // lobby / next game.
+  it(
+    "chat history pane is cleared when the game ends",
+    { timeout: 30000 },
+    async () => {
+      const pageA = await browser.newPage();
+      const pageB = await browser.newPage();
+      await pageA.goto(BASE);
+      await pageB.goto(BASE);
+      const lobbyId = "rclear-" + Date.now();
+      await pageA.fill("#name", "Alice");
+      await pageA.fill("#lobby-id", lobbyId);
+      await pageA.click("#join");
+      await pageA.waitForSelector("#players li");
+      await pageB.fill("#name", "Bob");
+      await pageB.fill("#lobby-id", lobbyId);
+      await pageB.click("#join");
+      await pageA.waitForFunction(() => document.querySelectorAll("#players li").length === 2);
+      await pageA.click("#ready");
+      await pageB.click("#ready");
+      await pageA.waitForFunction(
+        () => {
+          const el = document.getElementById("game");
+          return el && el.style.display !== "none";
+        },
+        { timeout: 10000 },
+      );
+
+      // Populate the history pane with a couple of messages.
+      await pageA.click('.reaction-emoji[data-emoji="🎉"]');
+      await pageB.click('.reaction-emoji[data-emoji="😂"]');
+      await pageA.waitForFunction(
+        () => {
+          const rows = document.querySelectorAll("#reaction-history .reaction-history-row");
+          return rows.length >= 2;
+        },
+        { timeout: 5000 },
+      );
+
+      // A wins (dev). The win flow shows the game-over overlay; clicking the
+      // return-to-lobby button runs resetGameState() which clears the pane.
+      await pageA.evaluate(() => sendMessage({ action: "dev_call_win" }));
+      await pageA.waitForFunction(
+        () => {
+          const ov = document.getElementById("game-over-overlay");
+          return ov && !ov.classList.contains("hidden");
+        },
+        { timeout: 5000 },
+      );
+      await pageA.click("#game-over-btn");
+
+      // History pane must be emptied and the box hidden again.
+      await pageA.waitForFunction(
+        () => {
+          const box = document.getElementById("reaction-history");
+          const wrap = document.getElementById("reaction-history-box");
+          return (
+            box &&
+            box.children.length === 0 &&
+            wrap &&
+            !wrap.classList.contains("has-messages")
+          );
+        },
+        { timeout: 5000 },
+      );
+      const cleared = await pageA.evaluate(() => {
+        const box = document.getElementById("reaction-history");
+        const wrap = document.getElementById("reaction-history-box");
+        return {
+          rows: box ? box.children.length : -1,
+          hasMessages: wrap ? wrap.classList.contains("has-messages") : null,
+        };
+      });
+      expect(cleared.rows).toBe(0);
+      expect(cleared.hasMessages).toBe(false);
+
+      await pageA.close();
+      await pageB.close();
     },
   );
 });

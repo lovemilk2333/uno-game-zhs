@@ -591,4 +591,212 @@ describe("Security", () => {
     expect(resp.headers.get("x-frame-options")).toBe("DENY");
     expect(resp.headers.get("content-security-policy")).toContain("default-src 'self'");
   });
+
+  // ── Chat history persistence / reconnect restore ────────────────────
+  // The server keeps the last N (CHAT_HISTORY_MAX=32) chat messages per
+  // lobby for the current game, and replays them in the reconnect `start`
+  // payload so a returning player gets back what they missed.
+
+  // Helper: build a 2-player game and return both clients + A's playerId.
+  async function buildGame(lobbyId) {
+    const a = await trackedWs();
+    const b = await trackedWs();
+    const aInit = await a.next();
+    await b.next();
+    const aId = aInit.id; // first message is `init` carrying the player id
+    a.ws.send(JSON.stringify({ action: "join", name: "hA", lobbyId }));
+    await new Promise((r) => setTimeout(r, 100));
+    b.ws.send(JSON.stringify({ action: "join", name: "hB", lobbyId }));
+    await new Promise((r) => setTimeout(r, 100));
+    a.ws.send(JSON.stringify({ action: "ready" }));
+    b.ws.send(JSON.stringify({ action: "ready" }));
+    let started = false;
+    for (let i = 0; i < 30 && !started; i++) {
+      try {
+        const m = await a.next(150);
+        if (m.action === "start") started = true;
+      } catch {}
+    }
+    return { a, b, aId, started };
+  }
+
+  it("replays chat history to a reconnecting player", async () => {
+    const lobbyId = "chathist";
+    const { a, b, aId, started } = await buildGame(lobbyId);
+    expect(started).toBe(true);
+
+    // B sends 3 messages (mix of emoji + text). A receives them live.
+    b.ws.send(JSON.stringify({ action: "reaction", type: "text", content: "hello" }));
+    await new Promise((r) => setTimeout(r, 60));
+    b.ws.send(JSON.stringify({ action: "reaction", type: "emoji", content: "🔥" }));
+    await new Promise((r) => setTimeout(r, 60));
+    a.ws.send(JSON.stringify({ action: "reaction", type: "text", content: "hi back" }));
+    await new Promise((r) => setTimeout(r, 200));
+
+    // A "reconnects" on a fresh socket using its known playerId.
+    const a2 = await trackedWs();
+    await a2.next(); // init
+    a2.ws.send(JSON.stringify({ action: "reconnect", playerId: aId }));
+
+    // Find the `start` reply carrying the chat history.
+    let startMsg = null;
+    for (let i = 0; i < 20 && !startMsg; i++) {
+      try {
+        const m = await a2.next(200);
+        if (m.action === "start") startMsg = m;
+      } catch {
+        break;
+      }
+    }
+    expect(startMsg).toBeTruthy();
+    expect(Array.isArray(startMsg.chatHistory)).toBe(true);
+    expect(startMsg.chatHistory.length).toBe(3);
+    expect(startMsg.chatHistory.map((e) => e.content)).toEqual(["hello", "🔥", "hi back"]);
+    expect(startMsg.chatHistory[0].type).toBe("text");
+    expect(startMsg.chatHistory[1].type).toBe("emoji");
+
+    a.close();
+    b.close();
+    a2.close();
+  });
+
+  it("caps stored chat history at 32 entries", async () => {
+    const lobbyId = "chatcap";
+    const { a, b, aId, started } = await buildGame(lobbyId);
+    expect(started).toBe(true);
+
+    // Fire 40 messages from B; only the last 32 should survive.
+    for (let i = 0; i < 40; i++) {
+      b.ws.send(JSON.stringify({ action: "reaction", type: "text", content: "m" + i }));
+    }
+    await new Promise((r) => setTimeout(r, 500));
+
+    const a2 = await trackedWs();
+    await a2.next();
+    a2.ws.send(JSON.stringify({ action: "reconnect", playerId: aId }));
+    let startMsg = null;
+    for (let i = 0; i < 20 && !startMsg; i++) {
+      try {
+        const m = await a2.next(200);
+        if (m.action === "start") startMsg = m;
+      } catch {
+        break;
+      }
+    }
+    expect(startMsg).toBeTruthy();
+    expect(startMsg.chatHistory.length).toBe(32);
+    // Oldest kept is m8 (0..7 trimmed), newest is m39.
+    expect(startMsg.chatHistory[0].content).toBe("m8");
+    expect(startMsg.chatHistory[31].content).toBe("m39");
+
+    a.close();
+    b.close();
+    a2.close();
+  });
+
+  it("does not record reactions before the game has started", async () => {
+    // Reactions are rejected pre-game (lobby only), so chat history stays
+    // empty until a game is in progress.
+    const lobbyId = "chatpre";
+    const a = await trackedWs();
+    const b = await trackedWs();
+    const aInit = await a.next();
+    await b.next();
+    const aId = aInit.id;
+    a.ws.send(JSON.stringify({ action: "join", name: "pA", lobbyId }));
+    await new Promise((r) => setTimeout(r, 100));
+    b.ws.send(JSON.stringify({ action: "join", name: "pB", lobbyId }));
+    await new Promise((r) => setTimeout(r, 100));
+    // Reaction sent while still in lobby (game not started) — must be ignored.
+    a.ws.send(JSON.stringify({ action: "reaction", type: "text", content: "early" }));
+    await new Promise((r) => setTimeout(r, 150));
+    // Now start the game.
+    a.ws.send(JSON.stringify({ action: "ready" }));
+    b.ws.send(JSON.stringify({ action: "ready" }));
+    let started = false;
+    for (let i = 0; i < 30 && !started; i++) {
+      try {
+        const m = await a.next(150);
+        if (m.action === "start") started = true;
+      } catch {}
+    }
+    expect(started).toBe(true);
+
+    const a2 = await trackedWs();
+    await a2.next();
+    a2.ws.send(JSON.stringify({ action: "reconnect", playerId: aId }));
+    let startMsg = null;
+    for (let i = 0; i < 20 && !startMsg; i++) {
+      try {
+        const m = await a2.next(200);
+        if (m.action === "start") startMsg = m;
+      } catch {
+        break;
+      }
+    }
+    expect(startMsg).toBeTruthy();
+    expect(startMsg.chatHistory).toEqual([]);
+
+    a.close();
+    b.close();
+    a2.close();
+  });
+
+  // Regression: once a game finishes the lobby's stored chat history must be
+  // wiped so the next game in the same lobby starts with a clean log instead
+  // of replaying the previous round's messages on reconnect.
+  it("clears chat history after a game completes (no bleed into next game)", async () => {
+    const lobbyId = "chatwin";
+    const g1 = await buildGame(lobbyId);
+    expect(g1.started).toBe(true);
+    const aId = g1.aId;
+
+    // Generate chat during game 1.
+    g1.b.ws.send(JSON.stringify({ action: "reaction", type: "text", content: "gg1" }));
+    await new Promise((r) => setTimeout(r, 60));
+    g1.a.ws.send(JSON.stringify({ action: "reaction", type: "text", content: "gg2" }));
+    await new Promise((r) => setTimeout(r, 150));
+
+    // A wins → broadcastWin tears the lobby down and clears chat history.
+    g1.a.ws.send(JSON.stringify({ action: "dev_call_win" }));
+    await new Promise((r) => setTimeout(r, 250));
+
+    // Start a brand new game in the SAME lobby on the same sockets. Neither
+    // player sends any reaction this round, so the only way history could be
+    // non-empty is if the previous game's messages leaked through.
+    g1.a.ws.send(JSON.stringify({ action: "join", name: "hA", lobbyId }));
+    await new Promise((r) => setTimeout(r, 100));
+    g1.b.ws.send(JSON.stringify({ action: "join", name: "hB", lobbyId }));
+    await new Promise((r) => setTimeout(r, 100));
+    g1.a.ws.send(JSON.stringify({ action: "ready" }));
+    g1.b.ws.send(JSON.stringify({ action: "ready" }));
+    let restarted = false;
+    for (let i = 0; i < 30 && !restarted; i++) {
+      try {
+        const m = await g1.a.next(150);
+        if (m.action === "start") restarted = true;
+      } catch {}
+    }
+    expect(restarted).toBe(true);
+
+    // Reconnect A: the replayed history for game 2 must be empty.
+    const a2 = await trackedWs();
+    await a2.next();
+    a2.ws.send(JSON.stringify({ action: "reconnect", playerId: aId }));
+    let startMsg = null;
+    for (let i = 0; i < 20 && !startMsg; i++) {
+      try {
+        const m = await a2.next(200);
+        if (m.action === "start") startMsg = m;
+      } catch {
+        break;
+      }
+    }
+    expect(startMsg).toBeTruthy();
+    expect(startMsg.chatHistory).toEqual([]);
+
+    g1.a.close();
+    g1.b.close();
+    a2.close();
+  });
 });
