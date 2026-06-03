@@ -2450,7 +2450,9 @@ process.on("SIGINT", () => {
   }
 });
 
-httpServer.on("listening", () => serverLog(`Server started on port http://0.0.0.0:${PORT}\n`));
+const is_windows = process.platform === 'win32'
+
+httpServer.on("listening", () => serverLog(`Server started on port http://${is_windows ? `127.0.0.1` : `0.0.0.0`}:${PORT}\n`));
 httpServer.on("error", (e: Error) => {
   console.error(e);
   process.emit("SIGINT");
