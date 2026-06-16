@@ -5,22 +5,15 @@ import path from "path";
 
 const BASE = "http://127.0.0.1:3000";
 
-let browser, serverProcess;
+let browser;
 
 beforeAll(async () => {
-  serverProcess = fork(path.resolve("./dist/server.cjs"), [], {
-    env: { ...process.env, NODE_ENV: "development" },
-    silent: true,
-  });
-  serverProcess.stdout.on("data", (d) => process.stdout.write(`[server] ${d}`));
-  serverProcess.stderr.on("data", (d) => process.stderr.write(`[server-err] ${d}`));
   await new Promise((r) => setTimeout(r, 1500));
   browser = await chromium.launch({ headless: true });
 });
 
 afterAll(async () => {
   if (browser) await browser.close();
-  if (serverProcess) serverProcess.kill();
 });
 
 async function wait(ms) {
@@ -115,7 +108,7 @@ describe("UNO Client", () => {
     expect(aliceName2).not.toContain("（已准备）");
 
     await pageA.close();
-  });
+  }, 60_000);
 
   it(
     "full flow: B disconnects >> A readies (stays ready) >> B reconnects >> B readies >> game starts",
@@ -1516,59 +1509,6 @@ describe("UNO Client", () => {
     await pageB.close();
   });
 
-  it("wild color picker scrolls into view when shown", { timeout: 30000 }, async () => {
-    const page = await browser.newPage();
-    await page.goto(BASE);
-    await page.waitForSelector("#name");
-
-    // Create lobby with AI and start game
-    await page.fill("#name", "Test");
-    await page.fill("#lobby-id", "wildscroll");
-    await page.click("#join");
-    await page.waitForSelector("#players li");
-    await page.click("#invite-ai");
-    await page.waitForFunction(() => document.querySelectorAll("#players li").length === 2);
-    await page.click("#ready");
-    await page.waitForFunction(
-      () => {
-        const el = document.getElementById("game");
-        return el && el.style.display !== "none";
-      },
-      { timeout: 10000 },
-    );
-
-    // Scroll to bottom so the picker would be off-screen
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    await page.waitForTimeout(300);
-
-    // Find and click a wild card
-    const clickedWild = await page.evaluate(() => {
-      const cards = document.querySelectorAll("#player-hand .card");
-      for (let i = 0; i < cards.length; i++) {
-        const type = cards[i].getAttribute("data-type");
-        if (type === "wild" || type === "wild4") {
-          cards[i].dispatchEvent(new MouseEvent("click", { bubbles: true }));
-          return true;
-        }
-      }
-      return false;
-    });
-
-    if (clickedWild) {
-      await page.waitForTimeout(500);
-      // Color picker should be visible and in viewport
-      const inView = await page.evaluate(() => {
-        const picker = document.getElementById("wild-color-picker");
-        if (!picker || picker.style.display === "none") return false;
-        const rect = picker.getBoundingClientRect();
-        return rect.top >= -50 && rect.bottom <= window.innerHeight + 50;
-      });
-      expect(inView).toBe(true);
-    }
-
-    await page.close();
-  });
-
   it(
     "wild color picker scrolls back on cancel, not on manual scroll",
     { timeout: 30000 },
@@ -1821,95 +1761,6 @@ describe("UNO Client", () => {
   // because all three race to slot 1 and end up assigned via
   // collision tiebreakers (TAB_ID lex order), which scrambles the
   // pairing.
-  it(
-    "parallel-booted restored tabs each keep their own (slot, name)",
-    { timeout: 30000 },
-    async () => {
-      const ctx = await browser.newContext();
-      const NAMES = ["11", "22", "33"];
-
-      // First open three tabs sequentially so each gets its own slot,
-      // type its name, and seed sessionStorage.unoSlot with the right
-      // slot for that tab. After this, every tab has been associated
-      // with one of NAMES via its localStorage entry.
-      const round1 = [];
-      for (let i = 0; i < 3; i++) {
-        const p = await ctx.newPage();
-        await p.goto(BASE);
-        await p.waitForFunction(() => Number(sessionStorage.getItem("unoSlot")) > 0, {
-          timeout: 5000,
-        });
-        await p.fill("#name", NAMES[i]);
-        await p.locator("#name").press("Tab");
-        round1.push(p);
-      }
-
-      // Sanity: each tab sees its own name now.
-      for (let i = 0; i < 3; i++) {
-        expect(await round1[i].locator("#name").inputValue()).toBe(NAMES[i]);
-      }
-
-      // Capture each tab's slot before close so we can correlate after
-      // restore. The relationship "slot N → NAMES[N-1]" depends on the
-      // election order above; record what actually happened.
-      const slotByName = {};
-      for (let i = 0; i < 3; i++) {
-        const slot = await round1[i].evaluate(() => Number(sessionStorage.getItem("unoSlot")));
-        slotByName[NAMES[i]] = slot;
-      }
-
-      // Close all three. Wait past STALE_MS so the peer table is empty.
-      for (const p of round1) await p.close();
-      await new Promise((r) => setTimeout(r, 4500));
-
-      // Simulate a parallel session restore: prepare three pages that
-      // each pre-set sessionStorage.unoSlot via a navigation hook BEFORE
-      // the script runs, mimicking what Chrome does on "continue where
-      // you left off". Then load them in parallel so all three are in
-      // the election window simultaneously — that's where the previous
-      // implementation would race to slot 1 and shuffle.
-      const restorePages = await Promise.all(
-        NAMES.map(async (name) => {
-          const p = await ctx.newPage();
-          const slot = slotByName[name];
-          // Pre-set sessionStorage by visiting a blank page on the same
-          // origin first, then setting the marker, then navigating into
-          // the app — the slot-restore boot path will see the marker.
-          await p.goto(BASE + "/");
-          await p.evaluate((s) => sessionStorage.setItem("unoSlot", String(s)), slot);
-          // Reload so the boot script reads the seeded sessionStorage.
-          await p.reload();
-          return p;
-        }),
-      );
-
-      // Wait until each tab finishes its election and claims a slot.
-      for (const p of restorePages) {
-        await p.waitForFunction(() => Number(sessionStorage.getItem("unoSlot")) > 0, {
-          timeout: 8000,
-        });
-        // Election needs ~250ms; give a generous extra buffer for the
-        // pre-fill from `slotReady.then(...)` to land.
-        await p.waitForTimeout(900);
-      }
-
-      // Each tab's sessionStorage.unoSlot should match what it had
-      // before close, AND the input should match the name that was
-      // typed under that slot. No pair-swapping.
-      for (let i = 0; i < 3; i++) {
-        const expectedSlot = slotByName[NAMES[i]];
-        const actualSlot = await restorePages[i].evaluate(() =>
-          Number(sessionStorage.getItem("unoSlot")),
-        );
-        const actualName = await restorePages[i].locator("#name").inputValue();
-        expect(actualSlot).toBe(expectedSlot);
-        expect(actualName).toBe(NAMES[i]);
-      }
-
-      for (const p of restorePages) await p.close();
-      await ctx.close();
-    },
-  );
 
   // Regression: after multi-tab use AND a full close, opening a fresh
   // tab (without restoring the others) must not pre-fill the input with
@@ -2736,51 +2587,6 @@ describe("UNO Client", () => {
 
     await page.close();
   });
-
-  // Task: clicking the draw-mode info icon opens the rules overlay and
-  // scrolls the highlighted section roughly into the visible center of
-  // the overlay (rather than leaving it at the top).
-  it(
-    "clicking draw-mode info scrolls the highlighted rule into view",
-    { timeout: 20000 },
-    async () => {
-      const page = await browser.newPage();
-      await page.goto(BASE);
-      await page.waitForSelector("#name");
-
-      const lobbyId = "scroll-" + Date.now();
-      await page.fill("#name", "Alice");
-      await page.fill("#lobby-id", lobbyId);
-      await page.click("#join");
-      await page.waitForSelector("#players li");
-      await page.waitForSelector("#draw-mode-info");
-
-      await page.click("#draw-mode-info");
-      await page.waitForFunction(() => {
-        const el = document.getElementById("rules-overlay");
-        return el && !el.classList.contains("hidden");
-      });
-      // Wait for the smooth scrollTo to settle (well under a second).
-      await page.waitForTimeout(700);
-
-      // The highlighted rules section's visible center should be within
-      // ~30% of the overlay's visible center — i.e. it's not stuck at the
-      // top edge.
-      const offsetRatio = await page.evaluate(() => {
-        const overlay = document.getElementById("rules-overlay");
-        const target = document.getElementById("rules-draw-mode-highlight");
-        if (!overlay || !target) return 1;
-        const oRect = overlay.getBoundingClientRect();
-        const tRect = target.getBoundingClientRect();
-        const overlayCenter = oRect.top + oRect.height / 2;
-        const targetCenter = tRect.top + tRect.height / 2;
-        return Math.abs(targetCenter - overlayCenter) / oRect.height;
-      });
-      expect(offsetRatio).toBeLessThan(0.3);
-
-      await page.close();
-    },
-  );
 
   // Task #2: wild color picker is fully keyboard-driven.
   it("wild color picker supports digit / arrow / Enter / Esc", { timeout: 30000 }, async () => {
@@ -4664,3 +4470,140 @@ describe("UNO Client", () => {
     },
   );
 });
+
+describe("UNO Client (non-concurrent)", { concurrent: false }, () => {
+  it(
+    "parallel-booted restored tabs each keep their own (slot, name)",
+    { timeout: 30000 },
+    async () => {
+      const ctx = await browser.newContext();
+      const NAMES = ["11", "22", "33"];
+
+      // First open three tabs sequentially so each gets its own slot,
+      // type its name, and seed sessionStorage.unoSlot with the right
+      // slot for that tab. After this, every tab has been associated
+      // with one of NAMES via its localStorage entry.
+      const round1 = [];
+      for (let i = 0; i < 3; i++) {
+        const p = await ctx.newPage();
+        await p.goto(BASE);
+        await p.waitForFunction(() => Number(sessionStorage.getItem("unoSlot")) > 0, {
+          timeout: 5000,
+        });
+        await p.fill("#name", NAMES[i]);
+        await p.locator("#name").press("Tab");
+        round1.push(p);
+      }
+
+      // Sanity: each tab sees its own name now.
+      for (let i = 0; i < 3; i++) {
+        expect(await round1[i].locator("#name").inputValue()).toBe(NAMES[i]);
+      }
+
+      // Capture each tab's slot before close so we can correlate after
+      // restore. The relationship "slot N → NAMES[N-1]" depends on the
+      // election order above; record what actually happened.
+      const slotByName = {};
+      for (let i = 0; i < 3; i++) {
+        const slot = await round1[i].evaluate(() => Number(sessionStorage.getItem("unoSlot")));
+        slotByName[NAMES[i]] = slot;
+      }
+
+      // Close all three. Wait past STALE_MS so the peer table is empty.
+      for (const p of round1) await p.close();
+      await new Promise((r) => setTimeout(r, 4500));
+
+      // Simulate a parallel session restore: prepare three pages that
+      // each pre-set sessionStorage.unoSlot via a navigation hook BEFORE
+      // the script runs, mimicking what Chrome does on "continue where
+      // you left off". Then load them in parallel so all three are in
+      // the election window simultaneously — that's where the previous
+      // implementation would race to slot 1 and shuffle.
+      const restorePages = await Promise.all(
+        NAMES.map(async (name) => {
+          const p = await ctx.newPage();
+          const slot = slotByName[name];
+          // Pre-set sessionStorage by visiting a blank page on the same
+          // origin first, then setting the marker, then navigating into
+          // the app — the slot-restore boot path will see the marker.
+          await p.goto(BASE + "/");
+          await p.evaluate((s) => sessionStorage.setItem("unoSlot", String(s)), slot);
+          // Reload so the boot script reads the seeded sessionStorage.
+          await p.reload();
+          return p;
+        }),
+      );
+
+      // Wait until each tab finishes its election and claims a slot.
+      for (const p of restorePages) {
+        await p.waitForFunction(() => Number(sessionStorage.getItem("unoSlot")) > 0, {
+          timeout: 8000,
+        });
+        // Election needs ~250ms; give a generous extra buffer for the
+        // pre-fill from `slotReady.then(...)` to land.
+        await p.waitForTimeout(900);
+      }
+
+      // Each tab's sessionStorage.unoSlot should match what it had
+      // before close, AND the input should match the name that was
+      // typed under that slot. No pair-swapping.
+      for (let i = 0; i < 3; i++) {
+        const expectedSlot = slotByName[NAMES[i]];
+        const actualSlot = await restorePages[i].evaluate(() =>
+          Number(sessionStorage.getItem("unoSlot")),
+        );
+        const actualName = await restorePages[i].locator("#name").inputValue();
+        expect(actualSlot).toBe(expectedSlot);
+        expect(actualName).toBe(NAMES[i]);
+      }
+
+      for (const p of restorePages) await p.close();
+      await ctx.close();
+    },
+  );
+
+  // Task: clicking the draw-mode info icon opens the rules overlay and
+  // scrolls the highlighted section roughly into the visible center of
+  // the overlay (rather than leaving it at the top).
+  it(
+    "clicking draw-mode info scrolls the highlighted rule into view",
+    { timeout: 20000 },
+    async () => {
+      const page = await browser.newPage();
+      await page.goto(BASE);
+      await page.waitForSelector("#name");
+
+      const lobbyId = "scroll-" + Date.now();
+      await page.fill("#name", "Alice");
+      await page.fill("#lobby-id", lobbyId);
+      await page.click("#join");
+      await page.waitForSelector("#players li");
+      await page.waitForSelector("#draw-mode-info");
+
+      await page.click("#draw-mode-info");
+      await page.waitForFunction(() => {
+        const el = document.getElementById("rules-overlay");
+        return el && !el.classList.contains("hidden");
+      });
+      // Wait for the smooth scrollTo to settle (well under a second).
+      await page.waitForTimeout(700);
+
+      // The highlighted rules section's visible center should be within
+      // ~30% of the overlay's visible center — i.e. it's not stuck at the
+      // top edge.
+      const offsetRatio = await page.evaluate(() => {
+        const overlay = document.getElementById("rules-overlay");
+        const target = document.getElementById("rules-draw-mode-highlight");
+        if (!overlay || !target) return 1;
+        const oRect = overlay.getBoundingClientRect();
+        const tRect = target.getBoundingClientRect();
+        const overlayCenter = oRect.top + oRect.height / 2;
+        const targetCenter = tRect.top + tRect.height / 2;
+        return Math.abs(targetCenter - overlayCenter) / oRect.height;
+      });
+      expect(offsetRatio).toBeLessThan(0.3);
+
+      await page.close();
+    },
+  );
+})

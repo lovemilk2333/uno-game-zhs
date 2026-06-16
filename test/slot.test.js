@@ -14,22 +14,14 @@ import path from "path";
 
 const BASE = "http://127.0.0.1:3000";
 
-let browser, serverProcess;
+let browser;
 
 beforeAll(async () => {
-  serverProcess = fork(path.resolve("./dist/server.cjs"), [], {
-    env: { ...process.env, NODE_ENV: "development" },
-    silent: true,
-  });
-  serverProcess.stdout.on("data", (d) => process.stdout.write(`[server] ${d}`));
-  serverProcess.stderr.on("data", (d) => process.stderr.write(`[server-err] ${d}`));
-  await new Promise((r) => setTimeout(r, 1500));
   browser = await chromium.launch({ headless: true });
 });
 
 afterAll(async () => {
   if (browser) await browser.close();
-  if (serverProcess) serverProcess.kill();
 });
 
 // Open a tab, wait until its boot has either claimed a slot OR finished

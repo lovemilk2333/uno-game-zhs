@@ -18,21 +18,7 @@ import { fork } from "child_process";
 import path from "path";
 import { WebSocket } from "ws";
 
-const PORT = 3003;
-
-let serverProcess;
-
-beforeAll(async () => {
-  serverProcess = fork(path.resolve("./dist/server.cjs"), ["--port", String(PORT)], {
-    env: { ...process.env, NODE_ENV: "development" },
-    silent: true,
-  });
-  await new Promise((r) => setTimeout(r, 1500));
-});
-
-afterAll(() => {
-  if (serverProcess) serverProcess.kill();
-});
+const PORT = 3000;
 
 async function openClient() {
   return new Promise((resolve, reject) => {

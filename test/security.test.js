@@ -3,22 +3,8 @@ import { fork } from "child_process";
 import path from "path";
 import { WebSocket } from "ws";
 
-const PORT = 3001;
+const PORT = 3000;
 const BASE = `http://localhost:${PORT}`;
-
-let serverProcess;
-
-beforeAll(async () => {
-  serverProcess = fork(path.resolve("./dist/server.cjs"), ["--port", String(PORT)], {
-    env: { ...process.env, NODE_ENV: "development" },
-    silent: true,
-  });
-  await new Promise((r) => setTimeout(r, 1500));
-});
-
-afterAll(() => {
-  if (serverProcess) serverProcess.kill();
-});
 
 async function trackedWs() {
   return new Promise((resolve, reject) => {
@@ -48,7 +34,7 @@ async function trackedWs() {
   });
 }
 
-describe("Security", () => {
+describe("Security", { concurrent: false }, () => {
   it("rejects path traversal in icon requests", async () => {
     const resp = await fetch(`${BASE}/icons/../../package.json`);
     expect(resp.status).not.toBe(200);

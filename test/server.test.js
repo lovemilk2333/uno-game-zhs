@@ -34,7 +34,7 @@ function send(ws, msg) {
   ws.send(JSON.stringify(msg));
 }
 
-describe("UNO Server", () => {
+describe("UNO Server", { concurrent: false }, () => {
   let server, port, lobbiesRef;
 
   beforeEach(async () => {

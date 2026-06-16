@@ -1,6 +1,3 @@
-// Test setup file for Vitest
-// Add any global test configuration here
-
 // Mock WebSocket for testing if needed
 global.WebSocket = class MockWebSocket {
   constructor(url) {

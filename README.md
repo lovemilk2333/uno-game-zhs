@@ -50,8 +50,8 @@ gh repo set-default # 选择您的仓库
 ## 开发
 
 ```bash
-pnpm dev          # tsx watch，即时重载
-pnpm test         # 运行全部测试
+pnpm dev
+pnpm test         # 运行全部测试 (必须同时运行开发服务器)
 ```
 
 ## 项目结构
