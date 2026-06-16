@@ -498,7 +498,36 @@ h1 {
 }
 
 /* Wild Color Picker */
+#wild-picker-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: rgba(0, 0, 0, 0.5);
+  animation: backdropFadeIn 0.22s ease-out;
+}
+
+#wild-picker-backdrop.closing {
+  animation: backdropFadeOut 0.16s ease-in forwards;
+}
+
+@keyframes backdropFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes backdropFadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
 #wild-color-picker {
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1000;
   background: #1e1e1e;
   border: 1px solid #374151;
   border-radius: 15px;
@@ -506,10 +535,6 @@ h1 {
   text-align: center;
   box-shadow: 0 15px 30px rgba(0, 0, 0, 0.4);
   backdrop-filter: blur(10px);
-  /* Animated open/close. Entry default: a quick scale-in from 92% with
-       a subtle drop. The .closing modifier reverses the motion before the
-       JS hides the element entirely. */
-  transform-origin: top center;
   animation: wildPickerIn 0.22s cubic-bezier(0.18, 0.89, 0.32, 1.27);
 }
 
@@ -520,24 +545,24 @@ h1 {
 @keyframes wildPickerIn {
   from {
     opacity: 0;
-    transform: scale(0.92) translateY(-8px);
+    transform: translate(-50%, -50%) scale(0.92);
   }
 
   to {
     opacity: 1;
-    transform: scale(1) translateY(0);
+    transform: translate(-50%, -50%) scale(1);
   }
 }
 
 @keyframes wildPickerOut {
   from {
     opacity: 1;
-    transform: scale(1) translateY(0);
+    transform: translate(-50%, -50%) scale(1);
   }
 
   to {
     opacity: 0;
-    transform: scale(0.96) translateY(-4px);
+    transform: translate(-50%, -50%) scale(0.96);
   }
 }
 
@@ -2193,6 +2218,112 @@ body.player-action-disabled #player-hand .card.not-playable {
   box-shadow: 0 12px 25px rgba(102, 126, 234, 0.4);
 }
 
+/* Room-level pause overlay. Mirrors the game-over overlay look-and-
+   feel but is informational for non-creators ("对局已暂停，等待房主
+   恢复") and actionable for the creator ("恢复对局"). Positioned
+   above the game UI so the user can read it even mid-turn. */
+#room-paused-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1500;
+  animation: modalIn 0.2s ease;
+}
+
+#room-paused-overlay.hidden {
+  display: none;
+}
+
+#room-paused-content {
+  background: #1e1e1e;
+  border: 1px solid #374151;
+  border-radius: 20px;
+  padding: 32px 40px;
+  max-width: 460px;
+  width: 90%;
+  color: #e0e0e0;
+  text-align: center;
+  line-height: 1.8;
+}
+
+#room-paused-title {
+  color: #fff;
+  margin: 12px 0 8px;
+}
+
+#room-paused-message {
+  color: #a0aec0;
+  font-size: 0.9rem;
+  margin: 8px 0 16px;
+  white-space: pre-line;
+}
+
+#room-paused-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#room-paused-resume-btn,
+#room-paused-cancel-request-btn {
+  width: 100%;
+  padding: 10px;
+  border: none;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+}
+
+#room-paused-resume-btn:hover,
+#room-paused-cancel-request-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 25px rgba(102, 126, 234, 0.4);
+}
+
+#room-paused-cancel-request-btn {
+  background: linear-gradient(135deg, #4a5568 0%, #2d3748 100%);
+  box-shadow: 0 8px 20px rgba(45, 55, 72, 0.3);
+}
+
+/* Action buttons for the in-game pause flow. The creator button
+   toggles pause/resume (label is updated in JS); the non-creator
+   button files a pause request which the creator can then approve. */
+#pause-btn,
+#pause-request-btn {
+  padding: 10px 18px;
+  border: 1px solid #f6ad55;
+  border-radius: 8px;
+  background: rgba(246, 173, 85, 0.1);
+  color: #f6ad55;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.2s ease;
+}
+
+#pause-btn:hover,
+#pause-request-btn:hover {
+  background: rgba(246, 173, 85, 0.2);
+  transform: translateY(-1px);
+}
+
+body.room-paused #player-hand,
+body.room-paused #draw-card,
+body.room-paused #surrender-btn,
+body.room-paused #action-buttons button:not(#leave-spectate-btn):not(#pause-btn):not(#pause-request-btn) {
+  filter: grayscale(0.6) opacity(0.5);
+  pointer-events: none;
+}
+
 /* Confetti particles for win */
 @keyframes confettiFall {
   0% {
@@ -2649,6 +2780,87 @@ footer a:hover {
   transform: translate(-50%, 0);
 }
 
+.game-toast {
+  position: fixed;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-20px);
+  z-index: 9998;
+  background: rgba(30, 30, 30, 0.95);
+  color: #e0e0e0;
+  padding: 10px 18px;
+  border-radius: 8px;
+  border: 1px solid #374151;
+  font-size: 0.875rem;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transition: opacity 0.3s ease-out, transform 0.3s ease-out;
+  pointer-events: none;
+  max-width: 80vw;
+  white-space: nowrap;
+}
+
+.game-toast.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.game-toast.warning {
+  background: rgba(239, 68, 68, 0.95);
+  border-color: #dc2626;
+  color: #fff;
+}
+
+#pause-request-toast {
+  position: fixed;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-20px);
+  z-index: 9998;
+  background: rgba(59, 130, 246, 0.95);
+  color: #fff;
+  padding: 10px 18px;
+  border-radius: 8px;
+  border: 1px solid #3b82f6;
+  font-size: 0.875rem;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+  opacity: 0;
+  transition: opacity 0.3s ease-out, transform 0.3s ease-out;
+  pointer-events: none;
+  max-width: 80vw;
+}
+
+#pause-request-toast.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+#chain-auto-draw-toast {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.9);
+  z-index: 9999;
+  background: rgba(239, 68, 68, 0.95);
+  color: #fff;
+  padding: 16px 24px;
+  border-radius: 12px;
+  border: 1px solid #dc2626;
+  font-size: 1.1rem;
+  font-weight: 600;
+  box-shadow: 0 8px 24px rgba(239, 68, 68, 0.4);
+  opacity: 0;
+  transition: opacity 0.2s ease-out, transform 0.2s ease-out;
+  pointer-events: none;
+}
+
+#chain-auto-draw-toast.visible {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
 /* Card keyboard-shortcut badge — top-right corner, similar to the wild
    color-picker digit hint. Only painted on the active player's first 10
    hand cards (see updateHand). */
@@ -2715,19 +2927,22 @@ footer a:hover {
 
 /* Penalty +N popup that floats up from the player tile when they get
    dealt 2 or more cards in a single update (draw2 / wild4 / chain
-   penalty). Lingers for ~5s so even a glance catches it. */
+   penalty). Lingers for ~5s so even a glance catches it. Now styled
+   as a reaction-text-style dark pill (Task 4) for visual consistency
+   with the chat history. */
 .penalty-popup {
   position: absolute;
   pointer-events: none;
-  font-size: 1.4rem;
+  font-size: 1.1rem;
   font-weight: 800;
-  color: #ff6b6b;
-  text-shadow:
-    0 2px 4px rgba(0, 0, 0, 0.6),
-    0 0 12px rgba(255, 107, 107, 0.5);
+  color: #ff8a8a;
   opacity: 0;
   transform: translateY(0);
   animation: penaltyFloat 5s ease-out forwards;
+  background: rgba(30, 30, 30, 0.9);
+  border: 1px solid #374151;
+  border-radius: 8px;
+  padding: 4px 10px;
 }
 
 @keyframes penaltyFloat {
@@ -2782,6 +2997,28 @@ footer a:hover {
   100% {
     opacity: 0;
     transform: translateY(40px);
+  }
+}
+
+@keyframes toastFadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+@keyframes toastFadeOut {
+  from {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-10px);
   }
 }
 

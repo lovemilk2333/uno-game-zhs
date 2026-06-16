@@ -38,6 +38,12 @@ interface Player {
   reconnectDeadline?: number | null;
   hand?: Card[];
   uno?: boolean;
+  // Tab focus state used by the room-pause auto-detection. `undefined`
+  // means "unknown" (haven't heard from the client yet). `_blurredAt`
+  // captures the last time the tab lost focus so the server can decide
+  // whether the unfocused window has lasted long enough to count.
+  _focused?: boolean;
+  _blurredAt?: number;
 }
 
 enum LobbyGameState {
@@ -58,6 +64,18 @@ interface Lobby {
   // client can restore the chat history it missed. Capped at
   // CHAT_HISTORY_MAX and cleared when a new game starts.
   chatHistory: ChatEntry[];
+  // Room-level pause state. When `paused` is true, the game is frozen
+  // for everyone: the turn timer is suspended, AI is held, and the
+  // server rejects any play/draw/leave/surrender/spectate actions. The
+  // creator can resume; if a non-creator wants to pause they file a
+  // request which the creator approves.
+  paused: boolean;
+  pausedBy: string | null;
+  pauseReason: string | null;
+  // Set of player ids that have an active pause/resume request pending. Cleared
+  // when the creator acts on the batch (approve / reject / auto-resolved
+  // by >2/3 majority or focus-based auto-pause).
+  pauseRequests: Set<string>;
   game: {
     deck: Card[];
     discardPile: Card[];
@@ -104,6 +122,8 @@ interface ClientMessage {
   type?: string;
   mode?: string;
   content?: string;
+  // Used by the room-pause `pause_focus_update` message.
+  focused?: boolean;
 }
 
 type StaticFile = [string, string];
@@ -379,6 +399,40 @@ interface TurnSnapshot {
 }
 const lobbyTurnSnapshots = new Map<string, TurnSnapshot>();
 
+// How long a player must have been unfocused before the auto-pause
+// check counts them. Tuned to "long enough that they actually stepped
+// away" (vs. just alt-tabbed for a quick peek) while still being
+// responsive enough to feel like a real pause, not a 5-minute wait.
+const FOCUS_AUTO_PAUSE_MS = 5_000;
+// How often we poll the unfocused-set for each started lobby. Cheap —
+// runs once per second across all lobbies, only the started ones with
+// a focus-able human count are visited.
+const FOCUS_POLL_MS = 1_000;
+let focusPollTimer: ReturnType<typeof setInterval> | null = null;
+
+// Walk every started lobby and check whether 2/3+ of the human players
+// have been blurred for longer than FOCUS_AUTO_PAUSE_MS. If so, auto-
+// pause the room. The poll is the same shape as the manual request
+// threshold (2/3 majority) so the two triggers feel symmetric.
+function tickFocusAutoPause(): void {
+  const now = Date.now();
+  for (const lobby of lobbies.values()) {
+    if (!lobby.game.started) continue;
+    if (lobby.paused) continue;
+    // AI is always considered "focused" — a paused-game decision should
+    // not hinge on an AI's lack of a tab.
+    const humans = lobby.players.filter((p) => !p.isAI);
+    if (humans.length === 0) continue;
+    const unfocused = humans.filter(
+      (p) => p._focused === false && typeof p._blurredAt === "number" && now - p._blurredAt >= FOCUS_AUTO_PAUSE_MS,
+    );
+    const threshold = Math.ceil((humans.length * 2) / 3);
+    if (unfocused.length >= threshold && threshold > 0) {
+      setLobbyPaused(lobby, true, null, "focus_auto_pause");
+    }
+  }
+}
+
 // ── Logging ──────────────────────────────────────────────
 const LOG_PREFIX = "[server]";
 
@@ -428,6 +482,10 @@ function createLobby(lobbyId: string): Lobby {
     id: lobbyId,
     players: [],
     chatHistory: [],
+    paused: false,
+    pausedBy: null,
+    pauseReason: null,
+    pauseRequests: new Set(),
     game: {
       deck: [],
       discardPile: [],
@@ -461,6 +519,55 @@ function broadcastToLobby(
   });
 }
 
+// Broadcast a skill card usage notification
+function broadcastSkillUsed(lobbyId: string, playerId: string, playerName: string, card: Card): void {
+  const skillNames: Record<string, string> = {
+    skip: "跳过",
+    reverse: "反转",
+    draw1: "+1",
+    draw2: "+2",
+    draw3: "+3",
+    wild: "变色",
+    wild4: "变色 +4",
+    reshuffle: "重洗",
+  };
+  const skillName = skillNames[card.type] || card.type;
+  broadcastToLobby(lobbyId, {
+    action: "skill_used",
+    playerId,
+    playerName,
+    skillName,
+  });
+}
+
+// Broadcast a +N penalty notification when a player draws due to a +N card
+function broadcastCardDrawn(lobbyId: string, playerId: string, playerName: string, cardType: string, count: number): void {
+  const nNames: Record<string, string> = {
+    draw1: "+1",
+    draw2: "+2",
+    draw3: "+3",
+    wild4: "+4",
+  };
+  const nName = nNames[cardType] || "+N";
+  broadcastToLobby(lobbyId, {
+    action: "card_drawn",
+    playerId,
+    playerName,
+    nName,
+    count,
+  });
+}
+
+// Broadcast a chain break notification when a player breaks a +N chain and draws penalty
+function broadcastChainBroken(lobbyId: string, playerId: string, playerName: string, penalty: number): void {
+  broadcastToLobby(lobbyId, {
+    action: "chain_broken",
+    playerId,
+    playerName,
+    penalty,
+  });
+}
+
 // Append a chat/reaction message to the lobby's rolling history (capped at
 // CHAT_HISTORY_MAX). Used so a reconnecting client can restore the chat it
 // missed while away. Content is already validated by the caller.
@@ -480,16 +587,32 @@ function broadcastPlayers(lobbyId: string): void {
   const lobby = lobbies.get(lobbyId);
   if (!lobby) return;
 
-  const message = {
-    action: "players",
-    players: lobby.players,
-    turn: lobby.game.turn,
-    lobbyId: lobbyId,
-    drawMode: lobby.game.drawMode,
-    turnDeadline: lobby.game.started ? getTurnDeadline(lobbyId) : null,
-    turnTimerPaused: lobby.game.started ? isTurnTimerPaused(lobbyId) : false,
-  };
-  broadcastToLobby(lobbyId, message);
+  for (const [client, meta] of clients) {
+    if (meta.lobbyId !== lobbyId) continue;
+    client.send(
+      JSON.stringify({
+        action: "players",
+        players: sanitizePlayersForClient(lobby.players),
+        turn: lobby.game.turn,
+        lobbyId: lobbyId,
+        drawMode: lobby.game.drawMode,
+        turnDeadline: lobby.game.started ? getTurnDeadline(lobbyId) : null,
+        turnTimerPaused: lobby.game.started ? isTurnTimerPaused(lobbyId) : false,
+        spectator: meta.isSpectator || false,
+        paused: lobby.paused,
+        pausedBy: lobby.pausedBy,
+        pauseReason: lobby.pauseReason,
+        pauseRequests: Array.from(lobby.pauseRequests),
+      }),
+    );
+  }
+}
+
+// Convenience: true when the room is currently in the "paused" state.
+// Centralised so all game-action handlers share the same predicate.
+function isLobbyPaused(lobbyId: string): boolean {
+  const lobby = lobbies.get(lobbyId);
+  return !!(lobby && lobby.paused);
 }
 
 function checkStartGame(lobbyId: string): void {
@@ -508,18 +631,96 @@ function checkStartGame(lobbyId: string): void {
   }
 }
 
+// Room-level pause helper. Centralises the side effects of toggling
+// `lobby.paused` so the three triggers (creator direct, majority
+// request, focus-based auto-pause) all broadcast the same shape and
+// freeze / unfreeze the turn timer the same way.
+//
+// On pause: snapshot the active turn timer's remaining wall-clock, mark
+// the lobby paused, suspend AI timeouts, broadcast `room_paused`.
+// On resume: re-arm the timer with the saved remaining (same pattern
+// the dev_toggle_turn_timer dev tool uses), clear the pause flag and
+// the pending request set, broadcast `room_resumed`.
+function setLobbyPaused(
+  lobby: Lobby,
+  paused: boolean,
+  byPlayerId: string | null,
+  reason: string,
+): void {
+  if (lobby.paused === paused) return;
+  lobby.paused = paused;
+  lobby.pausedBy = paused ? byPlayerId : null;
+  lobby.pauseReason = paused ? reason : null;
+
+  if (paused) {
+    // Suspend AI so the paused game doesn't keep moving.
+    clearAllAITimeouts(lobby.id);
+    // Snapshot the active turn timer's remaining wall-clock, mirroring
+    // the dev_toggle_turn_timer pause logic so resume restores the
+    // player the time that was left.
+    const t = turnTimers.get(lobby.id);
+    if (t) {
+      t.remainingMs = Math.max(0, t.deadline - Date.now());
+      clearTimeout(t.timer);
+      t.paused = true;
+      // Bump the token so an in-flight stale fire is invalidated.
+      const newToken = (turnTokens.get(lobby.id) || 0) + 1;
+      turnTokens.set(lobby.id, newToken);
+      t.token = newToken;
+    }
+    broadcastToLobby(lobby.id, {
+      action: "room_paused",
+      byPlayerId,
+      reason,
+    });
+  } else {
+    // Re-arm the turn timer with the remaining wall-clock from the
+    // pause snapshot, if there was an active turn timer.
+    const t = turnTimers.get(lobby.id);
+    if (t) {
+      const remaining = Math.max(0, t.remainingMs || 0);
+      const newToken = (turnTokens.get(lobby.id) || 0) + 1;
+      turnTokens.set(lobby.id, newToken);
+      const playerId = t.turnPlayerId;
+      const lobbyId = lobby.id;
+      const timer = setTimeout(() => {
+        if (turnTokens.get(lobbyId) !== newToken) return;
+        turnTimers.delete(lobbyId);
+        onTurnTimeout(lobbyId, playerId);
+      }, remaining);
+      t.timer = timer;
+      t.token = newToken;
+      t.deadline = Date.now() + remaining;
+      t.paused = false;
+      t.remainingMs = undefined;
+    }
+    lobby.pauseRequests.clear();
+    // Re-schedule any AI that should be moving so the resumed game
+    // doesn't sit on its hands.
+    scheduleAIMove(lobby.id);
+    broadcastToLobby(lobby.id, { action: "room_resumed" });
+  }
+  // Re-broadcast game state so the per-client `paused` / `pausedBy`
+  // fields are picked up by the players / update frames.
+  if (lobby.game.started) {
+    broadcastGameUpdate(lobby.id);
+  } else {
+    broadcastPlayers(lobby.id);
+  }
+}
+
 function createDeck(lobbyId: string): void {
   const lobby = lobbies.get(lobbyId);
   if (!lobby) return;
 
   const colors = ["red", "yellow", "green", "blue"];
-  const types = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "skip", "reverse", "draw2"];
+  const types = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "skip", "reverse", "draw1", "draw2", "draw3", "reshuffle"];
   const wildTypes = ["wild", "wild4"];
 
   for (const color of colors) {
     for (const type of types) {
       lobby.game.deck.push({ color, type });
-      if (type !== "0") {
+      if (type !== "0" && type !== "reshuffle") {
         lobby.game.deck.push({ color, type });
       }
     }
@@ -544,7 +745,7 @@ function shuffleDeck(lobbyId: string): void {
 
 function generateRandomCard(): Card {
   const colors = ["red", "yellow", "green", "blue"];
-  const types = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "skip", "reverse", "draw2"];
+  const types = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "skip", "reverse", "draw1", "draw2", "draw3", "reshuffle"];
   const r = Math.random();
   if (r < 0.05) return { type: "wild4" };
   if (r < 0.1) return { type: "wild" };
@@ -637,6 +838,11 @@ function startGame(lobbyId: string): void {
         hand: player.hand,
         id: metadata.id,
         turnDeadline,
+        spectator: metadata.isSpectator || false,
+        paused: lobby.paused,
+        pausedBy: lobby.pausedBy,
+        pauseReason: lobby.pauseReason,
+        pauseRequests: Array.from(lobby.pauseRequests),
       };
       client.send(JSON.stringify(message));
     }
@@ -655,18 +861,7 @@ function broadcastWin(lobbyId: string, winnerName: string): void {
   for (const [, meta] of clients) {
     if (meta.lobbyId === lobbyId) meta.lobbyId = null;
   }
-  lobby.players.length = 0;
-  lobby.chatHistory = [];
-  lobby.game = {
-    deck: [],
-    discardPile: [],
-    turn: 0,
-    direction: 1,
-    started: false,
-    state: LobbyGameState.normal,
-    drawingCount: 0,
-    drawMode: "chain",
-  };
+  resetLobbyGameState(lobby);
   startedLobbies.delete(lobbyId);
 }
 
@@ -685,8 +880,20 @@ function broadcastGameAborted(lobbyId: string, excludePlayerId: string): void {
   for (const [client, meta] of clients) {
     if (meta.lobbyId === lobbyId && meta.id !== excludePlayerId) meta.lobbyId = null;
   }
+  resetLobbyGameState(lobby);
+  startedLobbies.delete(lobbyId);
+}
+
+// Wipe a lobby's runtime game state back to a clean pre-game setup.
+// Used on game-over / abort boundaries so a fresh game in the same
+// lobby id starts with no leftover deck, no leftover pause state.
+function resetLobbyGameState(lobby: Lobby): void {
   lobby.players = [];
   lobby.chatHistory = [];
+  lobby.paused = false;
+  lobby.pausedBy = null;
+  lobby.pauseReason = null;
+  lobby.pauseRequests.clear();
   lobby.game = {
     deck: [],
     discardPile: [],
@@ -697,7 +904,6 @@ function broadcastGameAborted(lobbyId: string, excludePlayerId: string): void {
     drawingCount: 0,
     drawMode: "chain",
   };
-  startedLobbies.delete(lobbyId);
 }
 
 function checkGameAborted(lobbyId: string, excludePlayerId: string): void {
@@ -887,6 +1093,10 @@ function onTurnTimeout(lobbyId: string, expectedPlayerId: string): void {
 function performAIMove(lobbyId: string): void {
   const lobby = lobbies.get(lobbyId);
   if (!lobby || !lobby.game.started) return;
+  // While the room is paused, AI must not act — the player needs the
+  // game to be frozen so they can reorient themselves. The resume
+  // handler re-schedules AI moves, so this is the only "gate" needed.
+  if (lobby.paused) return;
 
   const currentPlayer = lobby.players[lobby.game.turn];
   if (!currentPlayer || !currentPlayer.isAI) return;
@@ -905,6 +1115,9 @@ function performAIMove(lobbyId: string): void {
 function scheduleAIMove(lobbyId: string): void {
   const lobby = lobbies.get(lobbyId);
   if (!lobby || !lobby.game.started) return;
+  // Don't queue AI timeouts while paused — would fire after resume
+  // and move the game before the human players are ready.
+  if (lobby.paused) return;
 
   const currentPlayer = lobby.players[lobby.game.turn];
   if (currentPlayer && currentPlayer.isAI) {
@@ -969,6 +1182,7 @@ function handlePlayMultiple(lobbyId: string, playerId: string, cards: Card[]): v
   const cardCount = cards.length;
 
   if (lastCard.type === "skip") {
+    broadcastSkillUsed(lobbyId, player.id, player.name, lastCard);
     // In chain mode, breaking the chain with skip/reverse must still apply
     // the accumulated penalty to the player who broke it. Without this the
     // chain effect is silently dropped (TODO #3 — "普通牌在部分情况下会使
@@ -985,6 +1199,7 @@ function handlePlayMultiple(lobbyId: string, playerId: string, cards: Card[]): v
     lobby.game.state = LobbyGameState.normal;
     lobby.game.drawingCount = 0;
   } else if (lastCard.type === "reverse") {
+    broadcastSkillUsed(lobbyId, player.id, player.name, lastCard);
     if (lobby.game.drawMode !== "direct" && lobby.game.state === LobbyGameState.drawing) {
       const penalty = lobby.game.drawingCount;
       if (penalty > 0 && player) {
@@ -998,13 +1213,31 @@ function handlePlayMultiple(lobbyId: string, playerId: string, cards: Card[]): v
       (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
     lobby.game.state = LobbyGameState.normal;
     lobby.game.drawingCount = 0;
-  } else if (lastCard.type === "draw2" || lastCard.type === "wild4") {
-    const n = (lastCard.type === "draw2" ? 2 : 4) * cardCount;
+  } else if (lastCard.type === "reshuffle") {
+    broadcastSkillUsed(lobbyId, player.id, player.name, lastCard);
+    if (lobby.game.drawMode !== "direct" && lobby.game.state === LobbyGameState.drawing) {
+      const penalty = lobby.game.drawingCount;
+      lobby.game.state = LobbyGameState.normal;
+      lobby.game.drawingCount = 0;
+      if (penalty > 0 && player) {
+        player.hand!.push(...drawCardsFromDeck(lobby, lobbyId, penalty));
+      }
+    }
+    const reshuffleCount = player.hand!.length;
+    player.hand = drawCardsFromDeck(lobby, lobbyId, reshuffleCount);
+    lobby.game.turn =
+      (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
+  } else if (lastCard.type === "draw1" || lastCard.type === "draw2" || lastCard.type === "draw3" || lastCard.type === "wild4") {
+    // Don't broadcast skill_used here - only show popup when a player actually draws
+    const drawN: Record<string, number> = { draw1: 1, draw2: 2, draw3: 3, wild4: 4 };
+    const n = (drawN[lastCard.type] || 2) * cardCount;
     if (lobby.game.drawMode === "direct") {
       const nextPlayerIndex =
         (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
       const nextPlayer = lobby.players[nextPlayerIndex];
       nextPlayer.hand!.push(...drawCardsFromDeck(lobby, lobbyId, n));
+      // Broadcast +N popup when a player actually draws due to a +N card
+      broadcastCardDrawn(lobby.id, nextPlayer.id, nextPlayer.name, lastCard.type, n);
       lobby.game.turn =
         (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
       lobby.game.state = LobbyGameState.normal;
@@ -1027,6 +1260,8 @@ function handlePlayMultiple(lobbyId: string, playerId: string, cards: Card[]): v
       lobby.game.drawingCount = 0;
       if (penalty > 0 && player) {
         player.hand!.push(...drawCardsFromDeck(lobby, lobbyId, penalty));
+        // Broadcast chain break popup
+        broadcastChainBroken(lobbyId, player.id, player.name, penalty);
       }
     }
     lobby.game.turn =
@@ -1072,9 +1307,7 @@ function handlePlay(lobbyId: string, playerId: string, card: Card): void {
     lobby.game.discardPile.push(card);
 
     if (card.type === "skip") {
-      // Chain-breaking via skip/reverse must still apply the penalty in
-      // chain mode (TODO #3). Without this, the player breaks the chain
-      // for free.
+      broadcastSkillUsed(lobbyId, player.id, player.name, card);
       if (lobby.game.drawMode !== "direct" && lobby.game.state === LobbyGameState.drawing) {
         const penalty = lobby.game.drawingCount;
         if (penalty > 0) {
@@ -1086,6 +1319,7 @@ function handlePlay(lobbyId: string, playerId: string, card: Card): void {
       lobby.game.state = LobbyGameState.normal;
       lobby.game.drawingCount = 0;
     } else if (card.type === "reverse") {
+      broadcastSkillUsed(lobbyId, player.id, player.name, card);
       if (lobby.game.drawMode !== "direct" && lobby.game.state === LobbyGameState.drawing) {
         const penalty = lobby.game.drawingCount;
         if (penalty > 0) {
@@ -1097,13 +1331,31 @@ function handlePlay(lobbyId: string, playerId: string, card: Card): void {
         (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
       lobby.game.state = LobbyGameState.normal;
       lobby.game.drawingCount = 0;
-    } else if (card.type === "draw2" || card.type === "wild4") {
-      const n = card.type === "draw2" ? 2 : 4;
+    } else if (card.type === "reshuffle") {
+      broadcastSkillUsed(lobbyId, player.id, player.name, card);
+      if (lobby.game.drawMode !== "direct" && lobby.game.state === LobbyGameState.drawing) {
+        const penalty = lobby.game.drawingCount;
+        lobby.game.state = LobbyGameState.normal;
+        lobby.game.drawingCount = 0;
+        if (penalty > 0) {
+          player!.hand!.push(...drawCardsFromDeck(lobby, lobbyId, penalty));
+        }
+      }
+      const reshuffleCount = player!.hand!.length;
+      player!.hand = drawCardsFromDeck(lobby, lobbyId, reshuffleCount);
+      lobby.game.turn =
+        (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
+    } else if (card.type === "draw1" || card.type === "draw2" || card.type === "draw3" || card.type === "wild4") {
+      // Don't broadcast skill_used here - only show popup when a player actually draws
+      const drawN: Record<string, number> = { draw1: 1, draw2: 2, draw3: 3, wild4: 4 };
+      const n = drawN[card.type] || 2;
       if (lobby.game.drawMode === "direct") {
         const nextPlayerIndex =
           (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
         const nextPlayer = lobby.players[nextPlayerIndex];
         nextPlayer.hand!.push(...drawCardsFromDeck(lobby, lobbyId, n));
+        // Broadcast +N popup when a player actually draws due to a +N card
+        broadcastCardDrawn(lobby.id, nextPlayer.id, nextPlayer.name, card.type, n);
         lobby.game.turn =
           (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
         lobby.game.state = LobbyGameState.normal;
@@ -1126,6 +1378,8 @@ function handlePlay(lobbyId: string, playerId: string, card: Card): void {
         lobby.game.drawingCount = 0;
         if (penalty > 0) {
           player!.hand!.push(...drawCardsFromDeck(lobby, lobbyId, penalty));
+          // Broadcast chain break popup
+          broadcastChainBroken(lobby.id, player.id, player.name, penalty);
         }
       }
       lobby.game.turn =
@@ -1190,7 +1444,7 @@ function isValidMove(lobbyId: string, card: Card): boolean {
 
   if (lobby.game.discardPile.length === 0) return true;
   const topCard = lobby.game.discardPile[lobby.game.discardPile.length - 1];
-  const isNCard = (t: string) => t === "draw2" || t === "wild4";
+  const isNCard = (t: string) => t === "draw1" || t === "draw2" || t === "draw3" || t === "wild4";
   return (
     card.color === topCard.color ||
     card.type === topCard.type ||
@@ -1261,6 +1515,10 @@ function broadcastGameUpdate(lobbyId: string): void {
         hand: player ? player.hand : [],
         turnDeadline,
         turnTimerPaused,
+        paused: lobby.paused,
+        pausedBy: lobby.pausedBy,
+        pauseReason: lobby.pauseReason,
+        pauseRequests: Array.from(lobby.pauseRequests),
       };
 
       client.send(JSON.stringify(message));
@@ -1431,6 +1689,7 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
                   turn: lobby.game.turn,
                   direction: lobby.game.direction,
                   hand: disconnectedPlayer.hand,
+                  spectator: metadata.isSpectator || false,
                 }),
               );
               return;
@@ -1771,6 +2030,7 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
                   turnDeadline: getTurnDeadline(session.lobbyId),
                   turnTimerPaused: isTurnTimerPaused(session.lobbyId),
                   chatHistory: rLobby!.chatHistory,
+                  spectator: metadata.isSpectator || false,
                 }),
               );
             }
@@ -1781,6 +2041,7 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
                 players: rLobby!.players,
                 turn: rLobby!.game.turn,
                 lobbyId: session.lobbyId,
+                spectator: metadata.isSpectator || false,
               }),
             );
           }
@@ -1792,12 +2053,20 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
             ws.send(JSON.stringify(errorResponse("LOBBY_NOT_FOUND")));
             return;
           }
+          if (isLobbyPaused(metadata.lobbyId!)) {
+            ws.send(JSON.stringify(errorResponse("ROOM_PAUSED")));
+            return;
+          }
           handlePlay(metadata.lobbyId!, metadata.id, message.card!);
           return;
 
         case "draw":
           if (!lobbies.has(metadata.lobbyId || "")) {
             ws.send(JSON.stringify(errorResponse("LOBBY_NOT_FOUND")));
+            return;
+          }
+          if (isLobbyPaused(metadata.lobbyId!)) {
+            ws.send(JSON.stringify(errorResponse("ROOM_PAUSED")));
             return;
           }
           handleDraw(metadata.lobbyId!, metadata.id);
@@ -1808,12 +2077,20 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
             ws.send(JSON.stringify(errorResponse("LOBBY_NOT_FOUND")));
             return;
           }
+          if (isLobbyPaused(metadata.lobbyId!)) {
+            ws.send(JSON.stringify(errorResponse("ROOM_PAUSED")));
+            return;
+          }
           handleUno(metadata.lobbyId!, metadata.id);
           return;
 
         case "play_multiple":
           if (!lobbies.has(metadata.lobbyId || "")) {
             ws.send(JSON.stringify(errorResponse("LOBBY_NOT_FOUND")));
+            return;
+          }
+          if (isLobbyPaused(metadata.lobbyId!)) {
+            ws.send(JSON.stringify(errorResponse("ROOM_PAUSED")));
             return;
           }
           handlePlayMultiple(metadata.lobbyId!, metadata.id, message.cards!);
@@ -1830,14 +2107,168 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
             ws.send(JSON.stringify(errorResponse("LOBBY_NOT_FOUND")));
             return;
           }
+          if (isLobbyPaused(metadata.lobbyId!)) {
+            ws.send(JSON.stringify(errorResponse("ROOM_PAUSED")));
+            return;
+          }
           handleLeave(metadata.lobbyId!, metadata.id);
           sessions.delete(metadata.id);
           metadata.lobbyId = null;
           return;
 
+        case "pause_direct": {
+          // Creator-initiated pause/resume. Creator clicks the pause
+          // button → room freezes; click again → resumes. Anyone else
+          // hitting the same button would 400 here.
+          const lobby = lobbies.get(metadata.lobbyId || "");
+          if (!lobby) {
+            ws.send(JSON.stringify(errorResponse("LOBBY_NOT_FOUND")));
+            return;
+          }
+          const caller = lobby.players.find((p) => p.id === metadata.id);
+          if (!caller || !caller.isCreator) {
+            ws.send(JSON.stringify(errorResponse("CREATOR_ONLY_PAUSE")));
+            return;
+          }
+          if (lobby.paused) {
+            setLobbyPaused(lobby, false, null, "creator_resume");
+          } else {
+            setLobbyPaused(lobby, true, metadata.id, "creator_pause");
+          }
+          return;
+        }
+
+        case "pause_request": {
+          // Non-creator asking to pause. The server records the request
+          // and forwards it to the creator. If 2/3+ of human players have
+          // requested, the room auto-pauses without creator approval.
+          // In 2-player games, a single non-creator request auto-pauses.
+          const lobby = lobbies.get(metadata.lobbyId || "");
+          if (!lobby) {
+            ws.send(JSON.stringify(errorResponse("LOBBY_NOT_FOUND")));
+            return;
+          }
+          const caller = lobby.players.find((p) => p.id === metadata.id);
+          if (!caller) return;
+          if (lobby.paused) return; // already paused, nothing to do
+          lobby.pauseRequests.add(metadata.id);
+          const humans = lobby.players.filter((p) => !p.isAI);
+          const reqs = lobby.pauseRequests.size;
+          // 2-player: single request auto-pauses
+          if (humans.length === 2) {
+            setLobbyPaused(lobby, true, null, "majority_request");
+            lobby.pauseRequests.clear();
+            return;
+          }
+          // 3+ player: 2/3 majority (rounded up) triggers automatic pause.
+          const threshold = Math.ceil((humans.length * 2) / 3);
+          if (reqs >= threshold && threshold > 0) {
+            setLobbyPaused(lobby, true, null, "majority_request");
+            // Clear pending requests since the room is now paused.
+            lobby.pauseRequests.clear();
+          } else {
+            // Notify everyone of the new pending request with the full request list.
+            const requestIds = Array.from(lobby.pauseRequests);
+            broadcastToLobby(lobby.id, {
+              action: "pause_request_added",
+              playerId: metadata.id,
+              playerName: caller.name,
+              count: reqs,
+              threshold,
+              requestIds,
+            });
+          }
+          return;
+        }
+
+        case "resume_request": {
+          // Non-creator asking to resume. The server records the request
+          // and forwards it to everyone. If 2/3+ of human players have
+          // requested, the room auto-resumes.
+          // In 2-player games, a single non-creator request auto-resumes.
+          const lobby = lobbies.get(metadata.lobbyId || "");
+          if (!lobby) {
+            ws.send(JSON.stringify(errorResponse("LOBBY_NOT_FOUND")));
+            return;
+          }
+          const caller = lobby.players.find((p) => p.id === metadata.id);
+          if (!caller) return;
+          if (!lobby.paused) return; // not paused, nothing to do
+          lobby.pauseRequests.add(metadata.id);
+          const humans = lobby.players.filter((p) => !p.isAI);
+          const reqs = lobby.pauseRequests.size;
+          // 2-player: single request auto-resumes
+          if (humans.length === 2) {
+            setLobbyPaused(lobby, false, null, "majority_resume");
+            lobby.pauseRequests.clear();
+            return;
+          }
+          // 3+ player: 2/3 majority (rounded up) triggers automatic resume.
+          const threshold = Math.ceil((humans.length * 2) / 3);
+          if (reqs >= threshold && threshold > 0) {
+            setLobbyPaused(lobby, false, null, "majority_resume");
+            // Clear pending requests since the room is now resumed.
+            lobby.pauseRequests.clear();
+          } else {
+            // Notify everyone of the new pending request with the full request list.
+            const requestIds = Array.from(lobby.pauseRequests);
+            broadcastToLobby(lobby.id, {
+              action: "pause_request_added",
+              playerId: metadata.id,
+              playerName: caller.name,
+              count: reqs,
+              threshold,
+              isResume: true,
+              requestIds,
+            });
+          }
+          return;
+        }
+
+        case "pause_cancel_request": {
+          // Player withdraws their pause/resume request. Only meaningful while
+          // the room is NOT yet acted on — once it's acted on the requests are cleared.
+          const lobby = lobbies.get(metadata.lobbyId || "");
+          if (!lobby) return;
+          lobby.pauseRequests.delete(metadata.id);
+          const caller = lobby.players.find((p) => p.id === metadata.id);
+          const requestIds = Array.from(lobby.pauseRequests);
+          broadcastToLobby(lobby.id, {
+            action: "pause_request_cancelled",
+            playerId: metadata.id,
+            playerName: caller ? caller.name : "?",
+            count: lobby.pauseRequests.size,
+            requestIds,
+          });
+          return;
+        }
+
+        case "pause_focus_update": {
+          // Client signals that the tab is blurred or focused. The
+          // server uses this together with the per-player focus timer
+          // to decide whether to auto-pause (2/3+ of players unfocused
+          // for an extended window). Kept lightweight — just records
+          // the latest state.
+          const lobby = lobbies.get(metadata.lobbyId || "");
+          if (!lobby) return;
+          const caller = lobby.players.find((p) => p.id === metadata.id);
+          if (!caller) return;
+          const focused = !!message.focused;
+          if (focused) caller._focused = true;
+          else {
+            caller._focused = false;
+            caller._blurredAt = Date.now();
+          }
+          return;
+        }
+
         case "surrender": {
           const sLobby = lobbies.get(metadata.lobbyId || "");
           if (!sLobby || !sLobby.game.started) return;
+          if (sLobby.paused) {
+            ws.send(JSON.stringify(errorResponse("ROOM_PAUSED")));
+            return;
+          }
           const surrenderPlayer = sLobby.players.find((p) => p.id === metadata.id);
           if (!surrenderPlayer) return;
 
@@ -1854,18 +2285,7 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
             ws.send(JSON.stringify({ action: "win", winner: "" }));
             broadcastToLobby(lobbyId, { action: "win", winner: "" });
             for (const [, m] of clients) m.lobbyId === lobbyId && (m.lobbyId = null);
-            sLobby.players = [];
-            sLobby.chatHistory = [];
-            sLobby.game = {
-              deck: [],
-              discardPile: [],
-              turn: 0,
-              direction: 1,
-              started: false,
-              state: LobbyGameState.normal,
-              drawingCount: 0,
-              drawMode: "chain",
-            };
+            resetLobbyGameState(sLobby);
             startedLobbies.delete(lobbyId);
             clearAllAITimeouts(lobbyId);
             resetTurnTimerState(lobbyId);
@@ -2221,6 +2641,26 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
           broadcastGameUpdate(metadata.lobbyId!);
           return;
         }
+        case "dev_focus_lost":
+        case "dev_focus_gained": {
+          // Manual focus event for testing — behaves exactly like pause_focus_update
+          // but is sent explicitly by the dev panel instead of automatically.
+          const focused = message.action === "dev_focus_gained";
+          const caller = lobbies.get(metadata.lobbyId!)?.players.find((p) => p.id === metadata.id);
+          if (!caller) return;
+
+          if (focused) {
+            caller._focused = true;
+            delete caller._blurredAt;
+          } else {
+            caller._focused = false;
+            caller._blurredAt = Date.now();
+          }
+          serverLog(
+            `dev_focus_${focused ? "gained" : "lost"} player=${caller.name.slice(0, 12)} lobby=${metadata.lobbyId!.slice(0, 8)}`,
+          );
+          return;
+        }
         default:
           serverWarn("unhandled dev event", message);
       }
@@ -2389,7 +2829,7 @@ function handleLeave(lobbyId: string, playerId: string): void {
       lobbyId,
       {
         action: "players",
-        players: lobby.players,
+        players: sanitizePlayersForClient(lobby.players),
         turn: lobby.game.turn,
         lobbyId: lobbyId,
         turnDeadline: lobby.game.started ? getTurnDeadline(lobbyId) : null,
@@ -2457,4 +2897,12 @@ httpServer.on("error", (e: Error) => {
   console.error(e);
   process.emit("SIGINT");
 });
+
+// Start the focus-auto-pause poller once the server is alive. Keeps
+// running for the life of the process; no cleanup needed because the
+// interval is cheap and exits when the process dies.
+if (!focusPollTimer) {
+  focusPollTimer = setInterval(tickFocusAutoPause, FOCUS_POLL_MS);
+}
+
 httpServer.listen(PORT);

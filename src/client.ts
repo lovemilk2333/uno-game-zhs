@@ -71,7 +71,27 @@ interface ServerMessage {
   turnDeadline?: number | null;
   turnTimerPaused?: boolean;
   chatHistory?: Array<{ playerId: string; type: "emoji" | "text"; content: string }>;
+  // Room-level pause fields.
+  paused?: boolean;
+  pausedBy?: string | null;
+  pauseReason?: string | null;
+  pauseRequests?: string[];
+  count?: number;
+  threshold?: number;
+  // Pause event fields.
+  byPlayerId?: string | null;
+  reason?: string | null;
 }
+
+// Room-level pause state. Mirrored from the server's `paused` flag on
+// every players/update frame. `pausedBy` is the player id who hit
+// pause (null if auto-paused by majority or focus-loss). `pauseReason`
+// surfaces why the room was paused ("creator_pause" | "majority_request"
+// | "focus_auto_pause") so the UI can phrase its banner correctly.
+let roomPaused = false;
+let roomPausedBy: string | null = null;
+let roomPauseReason: string | null = null;
+let roomPauseRequests: string[] = [];
 
 let NAME_LENGTH_MIN = 2;
 let NAME_LENGTH_MAX = 32;
@@ -641,6 +661,7 @@ function digitFromKeyEvent(e: KeyboardEvent): number {
   if (digit === 0) return 9;
   return digit - 1;
 }
+
 function getLeaveSpectateBtn(): HTMLButtonElement | null {
   return document.getElementById("leave-spectate-btn") as HTMLButtonElement | null;
 }
@@ -1025,6 +1046,17 @@ function connect(): void {
         turnDeadline = typeof message.turnDeadline === "number" ? message.turnDeadline : null;
         turnTimerPaused = !!message.turnTimerPaused;
         myLobbyId = message.lobbyId || null;
+        // Sync spectator state with server. Without this a rejoin that
+        // sent only `players` (e.g. a not-yet-started reconnect) would
+        // leave the previous isSpectating flag in place and the UI
+        // would mismatch the server's view of this client.
+        if (message.spectator !== undefined) {
+          isSpectating = !!message.spectator;
+          const _btnSpec = getLeaveSpectateBtn();
+          if (_btnSpec) _btnSpec.style.display = isSpectating ? "" : "none";
+          document.body.classList.toggle("spectator", isSpectating);
+        }
+        syncRoomPauseState(message);
         store.set("unoPlayerId", myId!);
         store.set("unoInLobby", "1");
         flushQueue();
@@ -1049,6 +1081,7 @@ function connect(): void {
         }
         break;
 
+
       case "start":
         clientLog(`start received, flushing actionQueue (was ${actionQueue.length})`);
         hideDisconnectedToast();
@@ -1056,6 +1089,9 @@ function connect(): void {
         myId = message.id!;
         store.set("unoPlayerId", myId);
         isSpectating = message.spectator || false;
+        // Pull room-pause state from the start frame so a reconnect
+        // into a paused game shows the right overlay immediately.
+        syncRoomPauseState(message);
         clientLog(
           "[start] myId =",
           myId,
@@ -1152,6 +1188,7 @@ function connect(): void {
         turnDeadline = typeof message.turnDeadline === "number" ? message.turnDeadline : null;
         turnTimerPaused = !!message.turnTimerPaused;
         myHand = message.hand || [];
+        syncRoomPauseState(message);
         updatePlayers(players, currentTurn);
         // Now that the new player tiles exist, spawn the +N popups so
         // they actually have a parent that survives the rebuild.
@@ -1239,6 +1276,70 @@ function connect(): void {
         showTurnTimeoutToast(isMe ? "你超时未操作，自动抽牌" : `${name} 超时未操作，自动抽牌`);
         break;
       }
+
+      case "room_paused":
+      case "room_resumed":
+        // The server has flipped the room-pause flag. Sync local
+        // state and re-render the action buttons + overlay. The
+        // subsequent `update` frame will carry the same info but
+        // honouring this dedicated message lets the UI feel snappy
+        // on the pause / resume instant.
+        roomPaused = message.action === "room_paused";
+        roomPausedBy = message.byPlayerId ?? null;
+        roomPauseReason = message.action === "room_paused" ? (message.reason ?? null) : null;
+        if (message.action === "room_resumed") {
+          roomPauseRequests = [];
+        }
+        updatePauseButtons();
+        break;
+
+      case "pause_request_added":
+        // A non-creator has filed a pause request. The creator sees
+        // this so they can review in the UI; non-creators see this so
+        // they can show the new request count in the request button.
+        if (message.requestIds && Array.isArray(message.requestIds)) {
+          // Use the complete request list from the server
+          roomPauseRequests = message.requestIds;
+        } else if (message.playerId) {
+          // Fallback: just add the player ID (old behavior)
+          roomPauseRequests = Array.from(
+            new Set([...roomPauseRequests, message.playerId]),
+          );
+        }
+        updatePauseButtons();
+        // Show toast notification when someone requests pause
+        if (message.playerName) {
+          showPauseRequestToast(message.playerName, roomPauseRequests.length, message.threshold || 0);
+        }
+        break;
+
+      case "pause_request_cancelled":
+        // Server removed the player's request (e.g. when game unpauses)
+        if (message.requestIds && Array.isArray(message.requestIds)) {
+          roomPauseRequests = message.requestIds;
+        } else if (message.playerId) {
+          roomPauseRequests = roomPauseRequests.filter((id) => id !== message.playerId);
+        }
+        updatePauseButtons();
+        break;
+      case "skill_used":
+        // Show a floating popup when a skill card is used
+        if (message.playerName && message.skillName) {
+          showSkillPopup(message.playerName, message.skillName);
+        }
+        break;
+      case "card_drawn":
+        // Show a floating popup when a player draws due to a +N card
+        if (message.playerName && message.nName && message.count !== undefined) {
+          showCardDrawnPopup(message.playerName, message.nName, message.count);
+        }
+        break;
+      case "chain_broken":
+        // Show a floating popup when a player breaks a +N chain and draws penalty
+        if (message.playerName && message.penalty !== undefined) {
+          showChainBrokenPopup(message.playerName, message.penalty);
+        }
+        break;
     }
   };
 
@@ -1314,6 +1415,91 @@ function updateReadyButton(): void {
     `updateReadyButton myId=${myId ? myId.slice(0, 8) : null} found=${!!me} ready=${me ? me.ready : null} text=${text}`,
   );
   readyButton.textContent = text;
+}
+
+// Sync the local room-pause mirrors from a server message. Called
+// from every players/update frame so a reconnect that lands on a
+// paused lobby gets the right state. The pause message fields are
+// optional (older clients may not include them) so we only overwrite
+// when present.
+function syncRoomPauseState(msg: ServerMessage): void {
+  if (msg.paused !== undefined) {
+    roomPaused = !!msg.paused;
+    roomPausedBy = msg.pausedBy ?? null;
+    roomPauseReason = msg.pauseReason ?? null;
+  }
+  if (msg.pauseRequests) {
+    roomPauseRequests = msg.pauseRequests;
+  }
+}
+
+// Show / hide the pause / pause-request buttons based on the current
+// game state and who this player is. Only render in-game (game div
+// visible). Creator gets the toggle; non-creators get a "request"
+// button that files a pause request.
+function updatePauseButtons(): void {  const me = players.find((p) => p.id === myId);
+  const isCreator = !!(me && me.isCreator);
+  const inGame = gameDiv.style.display !== "none";
+  const creatorBtn = document.getElementById("pause-btn") as HTMLButtonElement | null;
+  const requestBtn = document.getElementById("pause-request-btn") as HTMLButtonElement | null;
+  if (creatorBtn) {
+    creatorBtn.style.display = inGame && isCreator && !isSpectating ? "" : "none";
+    creatorBtn.textContent = roomPaused ? "恢复对局" : "暂停对局";
+  }
+  if (requestBtn) {
+    requestBtn.style.display = inGame && !isCreator && !isSpectating ? "" : "none";
+    requestBtn.textContent = "申请暂停";
+  }
+  // Dim the rest of the action area while paused so the user knows
+  // their input is intentionally inert.
+  document.body.classList.toggle("room-paused", roomPaused);
+  updatePauseOverlay();
+}
+
+// Drive the dedicated "对局已暂停" overlay. The creator sees a
+// "恢复对局" button; a non-creator who has filed a request sees a
+// "撤回暂停申请" button; everyone else just sees the notice. The
+// overlay is shown whenever roomPaused is true and we're in-game.
+function updatePauseOverlay(): void {
+  const overlay = document.getElementById("room-paused-overlay");
+  const message = document.getElementById("room-paused-message");
+  const resumeBtn = document.getElementById("room-paused-resume-btn");
+  const cancelBtn = document.getElementById("room-paused-cancel-request-btn");
+  if (!overlay || !message || !resumeBtn || !cancelBtn) return;
+  if (!roomPaused || gameDiv.style.display === "none") {
+    overlay.classList.add("hidden");
+    return;
+  }
+  overlay.classList.remove("hidden");
+  const me = players.find((p) => p.id === myId);
+  const isCreator = !!(me && me.isCreator);
+  // Phrase the banner based on who paused and how.
+  const pauser = players.find((p) => p.id === roomPausedBy);
+  if (roomPauseReason === "focus_auto_pause") {
+    message.textContent = "多数玩家标签页失焦，对局自动暂停。";
+  } else if (roomPauseReason === "majority_request" || roomPauseReason === "majority_resume") {
+    // Update the message dynamically based on current request count
+    const requestCount = roomPauseRequests.length;
+    if (requestCount === 0) {
+      // No pending requests anymore
+      message.textContent = "对局已暂停。";
+    } else {
+      message.textContent = `${requestCount} 位玩家申请暂停，对局已暂停。`;
+    }
+  } else if (pauser) {
+    message.textContent = `${pauser.name} 暂停了对局。`;
+  } else {
+    message.textContent = "对局已暂停。";
+  }
+  resumeBtn.style.display = isCreator ? "" : "none";
+  // Cancel button: show to all non-creators (no cancel functionality, just request)
+  const canToggle = !isCreator && !isSpectating;
+  if (canToggle) {
+    cancelBtn.textContent = "申请继续";
+    cancelBtn.style.display = "";
+  } else {
+    cancelBtn.style.display = "none";
+  }
 }
 
 function getTurnLabelEl(): HTMLSpanElement {
@@ -1417,6 +1603,54 @@ function updateTurnIndicator(): void {
   // The indicator's height can change with its content (label/timer),
   // so re-measure where the tiles row should pin flush beneath it.
   updateTilesStickyTop();
+  // Auto-prompt for the chain-draw case: if it's my turn with an
+  // active chain and I have no draw2 / wild4 to stack with, show
+  // the "要抽 N 张牌" dialog and prevent the player from playing any
+  // other card this turn. See handleChainAutoDrawPrompt for details.
+  maybePromptChainAutoDraw(isMyTurn);
+}
+
+// Track whether the auto-draw dialog is currently being shown for the
+// current turn. While true, the player cannot play a card; the only
+// valid action is to confirm the draw (or to use a draw2 / wild4 to
+// stack — but if they had one the prompt wouldn't be showing).
+let chainAutoDrawPromptActive = false;
+async function maybePromptChainAutoDraw(isMyTurn: boolean): Promise<void> {
+  // Only chain mode triggers this. Direct mode applies the +N
+  // immediately so there's nothing to confirm.
+  if (currentDrawMode !== "chain") {
+    chainAutoDrawPromptActive = false;
+    return;
+  }
+  // Need an active chain penalty and it must be my turn.
+  if (!(isMyTurn && gameState === 1 && drawingChain > 0 && !isSpectating)) {
+    chainAutoDrawPromptActive = false;
+    return;
+  }
+  // Already prompting this turn — no-op so the dialog doesn't repeat.
+  if (chainAutoDrawPromptActive) return;
+  // If the player has a stackable draw2 / wild4 in hand, let them play
+  // it as usual; only auto-prompt when they CAN'T continue the chain.
+  const hasStacker = myHand.some(
+    (c) => c.type === "draw1" || c.type === "draw2" || c.type === "draw3" || c.type === "wild4",
+  );
+  if (hasStacker) {
+    chainAutoDrawPromptActive = false;
+    return;
+  }
+  // Block card plays for the rest of this turn. The class is removed
+  // when the chain breaks / turn advances (see updateTurnIndicator's
+  // early return paths and the case where the dialog resolves).
+  chainAutoDrawPromptActive = true;
+  document.body.classList.add("chain-auto-draw-locked");
+  const n = drawingChain;
+  // Show non-cancelable notification and auto-send draw
+  showChainAutoDrawNotification(n);
+  // Auto-send draw after brief delay so player sees the notification
+  await new Promise((r) => setTimeout(r, 800));
+  document.body.classList.remove("chain-auto-draw-locked");
+  chainAutoDrawPromptActive = false;
+  sendMessage({ action: "draw" });
 }
 
 // Source-of-truth for the current draw mode the lobby is using. Tracked
@@ -1715,6 +1949,16 @@ function resetGameState(): void {
   document.body.classList.remove("spectator");
   const _btnSpec = getLeaveSpectateBtn();
   if (_btnSpec) _btnSpec.style.display = "none";
+  // Reset room-pause state. The server should also have cleared it
+  // (game-over / abort wipes the lobby), but a stale local mirror
+  // would otherwise leak the "对局已暂停" overlay into the next game.
+  roomPaused = false;
+  roomPausedBy = null;
+  roomPauseReason = null;
+  roomPauseRequests = [];
+  const pauseOverlay = document.getElementById("room-paused-overlay");
+  if (pauseOverlay) pauseOverlay.classList.add("hidden");
+  document.body.classList.remove("room-paused");
   // Reset to lobby
   lobbyDiv.style.display = "block";
   gameDiv.style.display = "none";
@@ -1916,6 +2160,10 @@ function updatePlayers(newPlayers: Player[], turn: number): void {
   drawModeArea.style.display = "flex";
   drawModeArea.classList.toggle("readonly", !(me && me.isCreator));
   updateReadyButton();
+  // Pause buttons: creator gets the toggle, non-creators get a
+  // request button. Only show them once a game is in flight; pause
+  // makes no sense in the lobby.
+  updatePauseButtons();
 
   // Drive the reconnect-countdown text via rAF instead of setInterval. The
   // setInterval approach is throttled to once per minute when the tab is
@@ -2010,13 +2258,17 @@ function updateHand(hand: Card[]): void {
 
     // Mark non-playable cards (no hover lift)
     if (topColor && topType) {
-      const isNCard = (t: string) => t === "draw2" || t === "wild4";
-      const playable =
+      const isNCard = (t: string) => t === "draw1" || t === "draw2" || t === "draw3" || t === "wild4";
+      let playable =
         card.type === "wild" ||
         card.type === "wild4" ||
         card.color === topColor ||
         card.type === topType ||
         (isNCard(card.type) && isNCard(topType));
+      // In chain mode, only N-cards can be played
+      if (playable && gameState === 1 && drawingChain > 0) {
+        playable = isNCard(card.type);
+      }
       if (!playable) cardDiv.classList.add("not-playable");
     }
 
@@ -2041,6 +2293,11 @@ function updateHand(hand: Card[]): void {
 }
 
 async function handleCardClick(card: Card, cardIndex: number, hand: Card[]): Promise<void> {
+  // Switch keyboard focus to the clicked card regardless of playability.
+  // This lets the user preview the card via keyboard after clicking it.
+  // If the card is not playable or not our turn, the play is blocked below
+  // but the visual focus still moves.
+  setKeyboardHover(cardIndex);
   // If wild color picker is open and this card is not wild, dismiss picker
   if (wildColorPicker.style.display !== "none" && card.type !== "wild" && card.type !== "wild4") {
     hideWildColorPicker();
@@ -2057,10 +2314,23 @@ async function handleCardClick(card: Card, cardIndex: number, hand: Card[]): Pro
     // can preview, but no dialog and no message goes to the server).
     return;
   }
+  // Auto-draw lock (Task 2): if the chain prompt has decided the player
+  // must take the penalty this turn, block any play attempt until the
+  // dialog resolves with a draw. Only block if this card isn't a
+  // stackable draw2 / wild4 — but the prompt would not be active in
+  // that case (hasStacker check in maybePromptChainAutoDraw), so we
+  // can just block unconditionally.
+  if (chainAutoDrawPromptActive) {
+    return;
+  }
+  // In chain-draw state with no stacker, the player cannot play any card
+  // (maybePromptChainAutoDraw handles the forced draw). If they DO have a
+  // stackable draw1/draw2/draw3/wild4, allow it; any other card breaks the chain but
+  // we no longer show a cancelable confirm — just block it.
+  if (gameState === 1 && drawingChain > 0 && card.type !== "draw1" && card.type !== "draw2" && card.type !== "draw3" && card.type !== "wild4") {
+    return;
+  }
   if (!isCardPlayable(card)) {
-    // Card visually has the .not-playable lift suppressed; we additionally
-    // bail early so the chain-break dialog doesn't appear for a card we
-    // would have rejected anyway.
     return;
   }
 
@@ -2070,22 +2340,8 @@ async function handleCardClick(card: Card, cardIndex: number, hand: Card[]): Pro
   } else {
     // Single card play
     if (card.type === "wild" || card.type === "wild4") {
-      // Bug #2: wild (no number) and wild4 also break the chain in chain
-      // mode — confirm before the player commits the penalty. wild4 is
-      // itself a draw card so it's chain-extending in chain mode and never
-      // hits this branch's confirm; wild is the regular non-draw wild card
-      // and absolutely should warn.
-      if (gameState === 1 && card.type === "wild" && drawingChain > 0) {
-        const ok = await showConfirm(`确定要打破链式加牌吗？\n你将抽 ${drawingChain} 张牌`);
-        if (!ok) return;
-      }
       showWildColorPicker(card);
     } else {
-      // In drawing chain state, confirm before breaking with non-draw2/wild4
-      if (gameState === 1 && card.type !== "draw2" && card.type !== "wild4" && drawingChain > 0) {
-        const ok = await showConfirm(`确定要打破链式加牌吗？\n你将抽 ${drawingChain} 张牌`);
-        if (!ok) return;
-      }
       sendMessage({ action: "play", card: card });
     }
   }
@@ -2103,9 +2359,19 @@ function isCardPlayable(card: Card): boolean {
   if (card.type === "wild" || card.type === "wild4") return true;
   if (card.color === topColor) return true;
   if (card.type === topType) return true;
-  const isNCard = (t: string) => t === "draw2" || t === "wild4";
+  const isNCard = (t: string) => t === "draw1" || t === "draw2" || t === "draw3" || t === "wild4";
   if (isNCard(card.type) && isNCard(topType)) return true;
   return false;
+}
+
+function isCardPlayableInContext(card: Card): boolean {
+  if (!isCardPlayable(card)) return false;
+  // In chain mode, only N-cards can be played
+  if (gameState === 1 && drawingChain > 0) {
+    const isNCard = (t: string) => t === "draw1" || t === "draw2" || t === "draw3" || t === "wild4";
+    return isNCard(card.type);
+  }
+  return true;
 }
 
 function startMultipleSelection(card: Card, cardIndex: number): void {
@@ -2143,11 +2409,18 @@ function playSelectedCards(): void {
 
   const firstCard = selectedCards[0].card;
   if (firstCard.type === "wild" || firstCard.type === "wild4") {
-    // For wild cards, we need to pick a color first
     pendingWildCard = selectedCards.map((s) => s.card);
-    wildColorPicker.style.display = "block";
+    wildColorPicker.classList.remove("closing");
+    void wildColorPicker.offsetWidth;
+    wildColorPicker.style.display = "flex";
+    const backdrop = document.getElementById("wild-picker-backdrop");
+    if (backdrop) {
+      backdrop.classList.remove("closing");
+      backdrop.style.display = "";
+    }
+    setWildKeyboardHover(-1);
+    detachWildKeyboard = attachWildKeyboard();
   } else {
-    // Send multiple cards to server
     sendMessage({
       action: "play_multiple",
       cards: selectedCards.map((s) => s.card),
@@ -2168,14 +2441,6 @@ function getCurrentHand(): Card[] {
   return myHand;
 }
 
-let wildPickerScrollY = 0;
-let onWildPickerScroll: (() => void) | null = null;
-
-// ── Wild color-picker keyboard support ──────────────────
-// The picker is fully keyboard-driven (Task 2): digit 1-4 picks the
-// matching color, ←/→ cycles the keyboard-hover ring, Enter commits the
-// hovered color, Esc cancels. Mirrors the pattern used by the modal so
-// users don't have to learn two different shortcut sets.
 const WILD_COLORS = ["red", "yellow", "green", "blue"] as const;
 let wildKeyboardIndex = -1;
 let detachWildKeyboard: (() => void) | null = null;
@@ -2203,41 +2468,24 @@ function commitWildPick(color: string): void {
   } else {
     sendMessage({ action: "play", card: { ...pendingWildCard, color } });
   }
-  wildPickerScrollY = 0;
   hideWildColorPicker();
 }
 
 function showWildColorPicker(card: Card): void {
   pendingWildCard = card;
-  wildPickerScrollY = window.scrollY;
-  // Reset any in-flight closing animation so the entry animation re-runs
-  // cleanly when the picker is opened back-to-back.
   wildColorPicker.classList.remove("closing");
-  // Forcing a reflow by reading offsetWidth lets the browser pick up the
-  // class change before we set display, otherwise the entry animation
-  // sometimes plays in the wrong direction during fast reopen sequences.
-  // eslint-disable-next-line no-unused-expressions
   void wildColorPicker.offsetWidth;
-  wildColorPicker.style.display = "block";
-  // Default to no keyboard hover — first digit / arrow press picks one.
+  wildColorPicker.style.display = "flex";
+  const backdrop = document.getElementById("wild-picker-backdrop");
+  if (backdrop) {
+    backdrop.classList.remove("closing");
+    backdrop.style.display = "";
+  }
   setWildKeyboardHover(-1);
-  // Attach the keyboard handler for this open instance.
   detachWildKeyboard = attachWildKeyboard();
-  requestAnimationFrame(() => {
-    wildColorPicker.scrollIntoView({ behavior: "smooth", block: "center" });
-    // Attach manual scroll listener after auto-scroll settles
-    setTimeout(() => {
-      onWildPickerScroll = () => {
-        wildPickerScrollY = 0;
-      };
-      window.addEventListener("scroll", onWildPickerScroll, { once: true });
-    }, 600);
-  });
 }
 
 function hideWildColorPicker(): void {
-  // Already hidden — nothing to do (and avoids a duplicate animation cycle
-  // when both Esc and the click handler race).
   if (wildColorPicker.style.display === "none") return;
   pendingWildCard = null;
   setWildKeyboardHover(-1);
@@ -2245,32 +2493,21 @@ function hideWildColorPicker(): void {
     detachWildKeyboard();
     detachWildKeyboard = null;
   }
-  if (onWildPickerScroll) {
-    window.removeEventListener("scroll", onWildPickerScroll);
-    onWildPickerScroll = null;
-  }
-  // Trigger the exit animation; only after it finishes do we set
-  // display:none. animationend fires reliably for our keyframe and we
-  // also use a fallback timeout in case the user navigates away.
   wildColorPicker.classList.add("closing");
-  const finish = () => {
-    wildColorPicker.classList.remove("closing");
-    wildColorPicker.style.display = "none";
-    if (wildPickerScrollY) {
-      window.scrollTo({ top: wildPickerScrollY, behavior: "smooth" });
-      wildPickerScrollY = 0;
-    }
-  };
+  const backdrop = document.getElementById("wild-picker-backdrop");
+  if (backdrop) backdrop.classList.add("closing");
   let done = false;
   const onEnd = () => {
     if (done) return;
     done = true;
-    wildColorPicker.removeEventListener("animationend", onEnd);
-    finish();
+    wildColorPicker.classList.remove("closing");
+    wildColorPicker.style.display = "none";
+    if (backdrop) {
+      backdrop.classList.remove("closing");
+      backdrop.style.display = "none";
+    }
   };
   wildColorPicker.addEventListener("animationend", onEnd, { once: true });
-  // Safety net — if animationend doesn't fire (e.g. element was hidden by
-  // a parent transition) make sure we still settle the state.
   setTimeout(onEnd, 250);
 }
 
@@ -2352,10 +2589,22 @@ function createCard(card: Card): HTMLDivElement {
     cornerNumber = "+4";
     cornerSymbol = "★";
     centerContent = "+4";
+  } else if (card.type === "draw1") {
+    cornerNumber = "+1";
+    cornerSymbol = "1";
+    centerContent = "+1";
   } else if (card.type === "draw2") {
     cornerNumber = "+2";
     cornerSymbol = "2";
     centerContent = "+2";
+  } else if (card.type === "draw3") {
+    cornerNumber = "+3";
+    cornerSymbol = "3";
+    centerContent = "+3";
+  } else if (card.type === "reshuffle") {
+    cornerNumber = "⟳";
+    cornerSymbol = "⟳";
+    centerContent = "⟳";
   } else if (card.type === "skip") {
     cornerNumber = "Ø";
     cornerSymbol = "Ø";
@@ -2430,7 +2679,6 @@ colorOptions.addEventListener("click", (e: Event) => {
         sendMessage({ action: "play", card: { ...pendingWildCard, color: color } });
       }
     }
-    wildPickerScrollY = 0;
     hideWildColorPicker();
   }
 });
@@ -2472,6 +2720,19 @@ joinButton.addEventListener("click", async () => {
   sendMessage(message);
 });
 
+function tryJoinFromKeyboard(e: KeyboardEvent): void {
+  if (e.key !== "Enter") return;
+  if (lobbyDiv.style.display === "none") return;
+  const name = nameInput.value.trim();
+  const lobbyId = lobbyIdInput.value.trim().toUpperCase();
+  if (!name || name.length < NAME_LENGTH_MIN || name.length > NAME_LENGTH_MAX) return;
+  if (nameInput.disabled || lobbyIdInput.disabled || joinButton.disabled) return;
+  joinButton.click();
+}
+
+nameInput.addEventListener("keydown", tryJoinFromKeyboard);
+lobbyIdInput.addEventListener("keydown", tryJoinFromKeyboard);
+
 if (inviteAIBtn) {
   inviteAIBtn.addEventListener("click", () => {
     sendMessage({ action: "add_ai" });
@@ -2491,11 +2752,7 @@ readyButton.addEventListener("click", () => {
   }
 });
 
-drawCardButton.addEventListener("click", async () => {
-  if (gameState === 1 && drawingChain > 0) {
-    const ok = await showConfirm(`确定要打破链式加牌吗？\n你将抽 ${drawingChain} 张牌`);
-    if (!ok) return;
-  }
+drawCardButton.addEventListener("click", () => {
   sendMessage({ action: "draw" });
 });
 
@@ -2506,6 +2763,81 @@ if (surrenderBtn) {
     if (confirmed) {
       sendMessage({ action: "surrender" });
     }
+  });
+}
+
+// ── Room pause / focus tracking ──────────────────────────
+// The client tells the server when its tab loses / regains focus. The
+// server then aggregates the focus map and auto-pauses the room when
+// 2/3+ of human players are unfocused for the FOCUS_AUTO_PAUSE_MS
+// window. We send the change immediately so the server's clock is the
+// source of truth on "how long has each player been blurred".
+
+// Toggle for auto-focus event reporting (controlled by dev panel)
+let autoFocusReporting = true;
+
+function reportFocus(focused: boolean): void {
+  // If auto-focus reporting is disabled, don't send focus events
+  if (!autoFocusReporting) return;
+
+  // Only meaningful when the user is actually in a game — otherwise
+  // the server has no lobbyId to attach the focus state to. The
+  // server also no-ops when the player isn't found, so it's safe to
+  // send before the lobby is joined (the message just gets dropped).
+  if (!myLobbyId) return;
+  sendMessage({ action: "pause_focus_update", focused });
+}
+
+// `visibilitychange` fires for tab switches, window minimise, OS-level
+// hide. `focus` / `blur` fire for window-level events that may not
+// always flip document.hidden. The pair ensures we catch both
+// flavours of "user stepped away" without double-reporting.
+document.addEventListener("visibilitychange", () => {
+  reportFocus(document.visibilityState === "visible");
+});
+window.addEventListener("focus", () => reportFocus(true));
+window.addEventListener("blur", () => reportFocus(false));
+
+// Initial focus state when the page first paints — defaults to true
+// (visible). The server's auto-pause logic only counts EXPLICIT
+// `false` reports, so leaving `_focused` undefined never contributes
+// to the unfocused count.
+reportFocus(true);
+
+const pauseBtn = document.getElementById("pause-btn") as HTMLButtonElement | null;
+if (pauseBtn) {
+  pauseBtn.addEventListener("click", () => {
+    sendMessage({ action: "pause_direct" });
+  });
+}
+
+const pauseRequestBtn = document.getElementById("pause-request-btn") as HTMLButtonElement | null;
+if (pauseRequestBtn) {
+  pauseRequestBtn.addEventListener("click", () => {
+    // Always send pause request (no cancel functionality)
+    sendMessage({ action: "pause_request" });
+  });
+}
+
+const roomPausedResumeBtn = document.getElementById("room-paused-resume-btn") as HTMLButtonElement | null;
+if (roomPausedResumeBtn) {
+  roomPausedResumeBtn.addEventListener("click", () => {
+    const caller = players.find((p) => p.id === myId);
+    if (caller && caller.isCreator) {
+      // Creator can directly resume
+      sendMessage({ action: "pause_direct" });
+    } else {
+      // Non-creator sends resume request
+      sendMessage({ action: "resume_request" });
+    }
+  });
+}
+
+const roomPausedCancelBtn = document.getElementById("room-paused-cancel-request-btn") as HTMLButtonElement | null;
+if (roomPausedCancelBtn) {
+  roomPausedCancelBtn.addEventListener("click", () => {
+    // Always send resume request (no cancel functionality)
+    sendMessage({ action: "resume_request" });
   });
 }
 
@@ -2775,6 +3107,53 @@ document.addEventListener("DOMContentLoaded", () => {
     return !!ae.isContentEditable;
   }
 
+  // Quick-digit-input buffer for selecting cards by number.
+  // Typing "11" selects card #11 (double-tap of same digit = confirm play).
+  let digitBuffer = "";
+  let digitBufferTimer: ReturnType<typeof setTimeout> | null = null;
+  const DIGIT_BUFFER_MS = 500;
+
+  function flushDigitBuffer(): void {
+    if (digitBuffer === "") return;
+    const idx = parseInt(digitBuffer, 10) - 1;
+    digitBuffer = "";
+    if (digitBufferTimer) {
+      clearTimeout(digitBufferTimer);
+      digitBufferTimer = null;
+    }
+    if (idx < 0 || idx >= myHand.length) {
+      clearKeyboardHover();
+      return;
+    }
+    setKeyboardHover(idx);
+  }
+
+  function feedDigit(d: number): void {
+    const ch = String(d === 0 ? 0 : d);
+    if (digitBuffer.length === 1 && digitBuffer === ch && keyboardHoverIndex === parseInt(ch, 10) - 1) {
+      digitBuffer = "";
+      if (digitBufferTimer) {
+        clearTimeout(digitBufferTimer);
+        digitBufferTimer = null;
+      }
+      playHoveredCard();
+      return;
+    }
+    const candidate = digitBuffer + ch;
+    const val = parseInt(candidate, 10);
+    if (val > myHand.length) {
+      digitBuffer = ch;
+    } else {
+      digitBuffer = candidate;
+    }
+    if (digitBufferTimer) clearTimeout(digitBufferTimer);
+    digitBufferTimer = setTimeout(flushDigitBuffer, DIGIT_BUFFER_MS);
+    const idx = parseInt(digitBuffer, 10) - 1;
+    if (idx >= 0 && idx < myHand.length) {
+      setKeyboardHover(idx);
+    }
+  }
+
   // Lobby & game-action keyboard shortcuts. Single-letter keys mapped
   // to the most-clicked buttons. The implementation is deliberately
   // narrow: each action validates its own preconditions (button
@@ -2894,6 +3273,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // don't double-handle.
     if (modalOverlay.style.display === "flex") return;
     if (wildColorPicker.style.display === "block") return;
+    if (wildColorPicker.style.display === "flex") return;
     // Only hover/play during the live game UI and only on our turn.
     if (gameDiv.style.display === "none" || isSpectating) return;
 
@@ -2904,32 +3284,44 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       return;
     }
+
+    // Non-turn-player: Escape still works to clear hover, but digit/Enter
+    // shortcuts are disabled so the hand stays inert.
+    const _me = players.find((p) => p.id === myId);
+    const _isMyTurn = !!_me && players[currentTurn] && players[currentTurn].id === myId;
+    if (!_isMyTurn) return;
     if (e.key === "Enter") {
       // Don't hijack Enter when focus is in a text input (chat) — that's
       // already handled by the input's own listener.
       const tag = (document.activeElement && (document.activeElement as HTMLElement).tagName) || "";
       if (tag === "INPUT" || tag === "TEXTAREA") return;
+      // Flush any pending digit buffer first
+      flushDigitBuffer();
       if (keyboardHoverIndex < 0 || keyboardHoverIndex >= myHand.length) return;
+      // Auto-draw lock: block plays even via keyboard while the chain
+      // prompt is active.
+      if (chainAutoDrawPromptActive) {
+        e.preventDefault();
+        return;
+      }
       e.preventDefault();
       playHoveredCard();
       return;
     }
-    const idx = digitFromKeyEvent(e);
-    if (idx === -1) return;
-    if (idx >= myHand.length) {
-      // Pressing a digit higher than hand size is a clear cancel.
-      clearKeyboardHover();
-      return;
-    }
+    const digit = digitFromKeyEvent(e);
+    if (digit === -1) return;
     e.preventDefault();
-    // Pressing the same digit twice in a row plays the already-hovered
-    // card — a "double-tap to confirm" shortcut so users don't have to
-    // shift their hand from the digit row to Enter every time.
-    if (idx === keyboardHoverIndex) {
-      playHoveredCard();
+    // While the auto-draw lock is active, digits still update the hover
+    // preview but Enter is blocked from playing.
+    if (chainAutoDrawPromptActive) {
+      if (digit >= myHand.length) {
+        clearKeyboardHover();
+        return;
+      }
+      setKeyboardHover(digit);
       return;
     }
-    setKeyboardHover(idx);
+    feedDigit(digit + 1);
   });
 
   // Click on empty area cancels the keyboard hover. We listen on document
@@ -3227,6 +3619,152 @@ function showTurnTimeoutToast(text: string): void {
   }, 3500);
 }
 
+// function showPauseRequestToast(playerName: string, count: number, threshold: number): void {
+//   const layer = document.getElementById("popup-layer") as HTMLElement | null;
+//   if (!layer) return;
+
+//   const toast = document.createElement("div");
+//   toast.classList.add("pause-toast", "user-select");
+//   toast.innerHTML = `<span class="pause-toast-text">${playerName} 申请暂停</span>`;
+//   toast.style.position = "fixed";
+//   toast.style.top = "20px";
+//   toast.style.left = "50%";
+//   toast.style.transform = "translateX(-50%) translateY(0)";
+//   toast.style.background = "rgba(231, 76, 60, 0.9)";
+//   toast.style.color = "#fff";
+//   toast.style.padding = "12px 20px";
+//   toast.style.borderRadius = "8px";
+//   toast.style.boxShadow = "0 4px 12px rgba(0,0,0,0.3)";
+//   toast.style.zIndex = "10000";
+//   toast.style.animation = "toastFadeIn 0.3s ease";
+
+//   layer.appendChild(toast);
+
+//   setTimeout(() => {
+//     toast.style.animation = "toastFadeOut 0.3s ease";
+//     setTimeout(() => {
+//       toast.remove();
+//     }, 300);
+//   }, 3000);
+// }
+
+function showSkillPopup(playerName: string, skillName: string, showVerb: boolean=true): void {
+  const layer = document.getElementById("popup-layer") as HTMLElement | null;
+  if (!layer) return;
+
+  const popup = document.createElement("div");
+  popup.classList.add("skill-popup", "user-select");
+  popup.innerHTML = `<span class="skill-popup-text"><b>${playerName}</b>${showVerb ? ' 触发了 ' : ' '}<b>${skillName}</b></span>`;
+  popup.style.position = "fixed";
+  popup.style.top = "80px";
+  popup.style.left = "50%";
+  popup.style.transform = "translateX(-50%) translateY(0)";
+  popup.style.background = "rgba(102, 126, 234, 0.95)";
+  popup.style.color = "#fff";
+  popup.style.padding = "12px 24px";
+  popup.style.borderRadius = "8px";
+  popup.style.boxShadow = "0 4px 12px rgba(0,0,0,0.3)";
+  popup.style.zIndex = "10000";
+  popup.style.animation = "toastFadeIn 0.3s ease";
+
+  layer.appendChild(popup);
+
+  setTimeout(() => {
+    popup.style.animation = "toastFadeOut 0.3s ease";
+    setTimeout(() => {
+      popup.remove();
+    }, 300);
+  }, 3000);
+}
+
+function showCardDrawnPopup(playerName: string, nName: string, count: number): void {
+  const layer = document.getElementById("popup-layer") as HTMLElement | null;
+  if (!layer) return;
+
+  const popup = document.createElement("div");
+  popup.classList.add("drawn-popup", "user-select");
+  popup.innerHTML = `<span class="drawn-popup-text"><b>${playerName}</b> 影响了 ${count} 张</span>`;
+  popup.style.position = "fixed";
+  popup.style.top = "80px";
+  popup.style.left = "50%";
+  popup.style.transform = "translateX(-50%) translateY(0)";
+  popup.style.background = "rgba(231, 76, 60, 0.95)";
+  popup.style.color = "#fff";
+  popup.style.padding = "12px 24px";
+  popup.style.borderRadius = "8px";
+  popup.style.boxShadow = "0 4px 12px rgba(0,0,0,0.3)";
+  popup.style.zIndex = "10000";
+  popup.style.animation = "toastFadeIn 0.3s ease";
+
+  layer.appendChild(popup);
+
+  setTimeout(() => {
+    popup.style.animation = "toastFadeOut 0.3s ease";
+    setTimeout(() => {
+      popup.remove();
+    }, 300);
+  }, 3000);
+}
+
+function showChainBrokenPopup(playerName: string, penalty: number): void {
+  const layer = document.getElementById("popup-layer") as HTMLElement | null;
+  if (!layer) return;
+
+  const popup = document.createElement("div");
+  popup.classList.add("chain-broken-popup", "user-select");
+  popup.innerHTML = `<span class="chain-broken-popup-text"><b>${playerName}</b> 打破链式加牌，抽 ${penalty} 张</span>`;
+  popup.style.position = "fixed";
+  popup.style.top = "80px";
+  popup.style.left = "50%";
+  popup.style.transform = "translateX(-50%) translateY(0)";
+  popup.style.background = "rgba(245, 158, 11, 0.95)";
+  popup.style.color = "#fff";
+  popup.style.padding = "12px 24px";
+  popup.style.borderRadius = "8px";
+  popup.style.boxShadow = "0 4px 12px rgba(0,0,0,0.3)";
+  popup.style.zIndex = "10000";
+  popup.style.animation = "toastFadeIn 0.3s ease";
+
+  layer.appendChild(popup);
+
+  setTimeout(() => {
+    popup.style.animation = "toastFadeOut 0.3s ease";
+    setTimeout(() => {
+      popup.remove();
+    }, 300);
+  }, 3000);
+}
+
+function showPauseRequestToast(playerName: string, count: number, threshold: number): void {
+  let toast = document.getElementById("pause-request-toast") as HTMLDivElement | null;
+  if (!toast) {
+    toast = document.createElement("div");
+    toast.id = "pause-request-toast";
+    toast.className = "game-toast";
+    document.body.appendChild(toast);
+  }
+  toast.textContent = `${playerName} 申请暂停对局 (${count}/${threshold || "?"})`;
+  toast.classList.add("visible");
+  setTimeout(() => {
+    toast!.classList.remove("visible");
+  }, 4000);
+}
+
+function showChainAutoDrawNotification(n: number): void {
+  let toast = document.getElementById("chain-auto-draw-toast") as HTMLDivElement | null;
+  if (!toast) {
+    toast = document.createElement("div");
+    toast.id = "chain-auto-draw-toast";
+    toast.className = "game-toast warning";
+    document.body.appendChild(toast);
+  }
+  toast.textContent = `正在抽 ${n} 张牌...`;
+  toast.classList.add("visible");
+  setTimeout(() => {
+    toast!.classList.remove("visible");
+  }, 1500);
+}
+
 function createLeaveLobbyButton(): HTMLButtonElement {
   const leaveLobbyBtn = document.createElement("button");
   leaveLobbyBtn.id = "leave-lobby";
@@ -3366,7 +3904,8 @@ function computePenaltyDeltas(prev: Player[], next: Player[]): Array<[string, nu
   for (const np of next) {
     const op = prevById.get(np.id);
     if (!op) continue;
-    const before = op.cardCount ?? 0;
+    const before = op.cardCount;
+    if (before === undefined || before === null) continue;
     const after = np.cardCount ?? 0;
     const delta = after - before;
     if (delta >= 2) out.push([np.id, delta]);
@@ -3396,12 +3935,24 @@ function spawnPenaltyPopup(playerId: string, delta: number): void {
   const anchor =
     playerDiv || (document.getElementById("turn-indicator") as HTMLElement | null);
   if (!anchor) return;
+  // Use the chain's final drawingCount when present, so a +2 +2 +2
+  // stack shows "+6" instead of three "+2" badges — the penalty the
+  // player actually absorbed is the total, not any single contributor.
+  // In direct mode drawingCount is 0 (each card applies immediately)
+  // so we fall back to the per-card delta.
+  const value = gameState === 1 && drawingChain > 0 ? drawingChain : delta;
   const popup = document.createElement("div");
   popup.classList.add("penalty-popup");
-  popup.textContent = `+${delta}`;
+  // Visual: render as a reaction-text-style background box (Task 4).
+  // The .reaction-popup-text class gives it the dark pill look; a
+  // .penalty-popup modifier keeps the existing float-up keyframe.
+  popup.classList.add("reaction-popup-text");
+  popup.textContent = `+${value}`;
   mountFloatingPopup(popup, anchor, "right");
   // 5s total animation = 0.4s rise + 4.2s linger + 0.4s fade.
   setTimeout(() => popup.remove(), 5200);
+  const player = players.find((p) => p.id === playerId)
+  showSkillPopup(player?.name || playerId, `被加牌 ${value} 张`, false)
 }
 
 // Mounts a transient floating popup (reaction / +N) into #popup-layer,
@@ -3424,8 +3975,8 @@ function mountFloatingPopup(
   if (align === "center") {
     popup.style.left = `${Math.round(rect.left + rect.width / 2)}px`;
   } else {
-    // Near the tile's right edge (mirrors the old `right: 8px`).
     popup.style.left = `${Math.round(rect.right - 8)}px`;
+    popup.style.translate = "-100% 0";
   }
   if (collapsed) {
     popup.classList.add("popup-down");
@@ -3687,6 +4238,14 @@ function setupDevPanel(): void {
     if (count !== undefined) msg.count = count;
     sendMessage(msg);
   });
+
+  // Auto-focus toggle handler
+  const autoFocusToggle = document.getElementById("dev-auto-focus-toggle") as HTMLInputElement | null;
+  if (autoFocusToggle) {
+    autoFocusToggle.addEventListener("change", (e) => {
+      autoFocusReporting = (e.target as HTMLInputElement).checked;
+    });
+  }
 }
 
 (function initDevPanel() {

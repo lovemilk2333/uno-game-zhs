@@ -14,6 +14,8 @@ export const ERR: Record<string, ErrorDef> = {
   CREATOR_ONLY_KICK_AI: { message: "只有房主可以踢出 AI" },
   CREATOR_ONLY_TRANSFER: { message: "只有房主可以转让" },
   CREATOR_ONLY_DRAW_MODE: { message: "只有房主可以修改加牌模式" },
+  CREATOR_ONLY_PAUSE: { message: "只有房主可以直接暂停/恢复对局" },
+  ROOM_PAUSED: { message: "对局已暂停，请等待房主恢复" },
   AI_NOT_FOUND: { message: "AI 玩家未找到" },
   AI_LIMIT_REACHED: { message: "AI 玩家数量已达上限" },
   TARGET_INVALID: { message: "目标玩家无效" },
