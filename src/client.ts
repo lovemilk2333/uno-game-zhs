@@ -1392,6 +1392,8 @@ function flushQueue(): void {
 }
 
 function sendMessage(message: object): boolean {
+  clearSelection()
+
   if (canSendMessage()) {
     ws!.send(JSON.stringify(message));
     return true;
