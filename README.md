@@ -51,7 +51,12 @@ gh repo set-default # 选择您的仓库
 
 ```bash
 pnpm dev
-pnpm test         # 运行全部测试 (必须同时运行开发服务器)
+```
+
+## 测试
+
+```bash
+pnpm test
 ```
 
 ## 项目结构
