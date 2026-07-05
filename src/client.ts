@@ -81,6 +81,11 @@ interface ServerMessage {
   // Pause event fields.
   byPlayerId?: string | null;
   reason?: string | null;
+  // Skill / reaction event fields.
+  skillName?: string;
+  displayText?: string;
+  nName?: string;
+  penalty?: number;
 }
 
 // Room-level pause state. Mirrored from the server's `paused` flag on
@@ -1325,9 +1330,13 @@ function connect(): void {
         updatePauseButtons();
         break;
       case "skill_used":
-        // Show a floating popup when a skill card is used
-        if (message.playerName && message.skillName) {
-          showSkillPopup(message.playerName, message.skillName);
+        // Show a floating popup when a skill card is used.
+        // Prefer the server-supplied displayText; fall back to the
+        // legacy template for older server builds that don't send it.
+        if (message.displayText) {
+          showSkillPopup(message.displayText);
+        } else if (message.playerName && message.skillName) {
+          showSkillPopup(`${message.playerName} 触发了 ${message.skillName}`);
         }
         break;
       case "card_drawn":
@@ -3670,13 +3679,13 @@ function showTurnTimeoutToast(text: string): void {
 //   }, 3000);
 // }
 
-function showSkillPopup(playerName: string, skillName: string, showVerb: boolean=true): void {
+function showSkillPopup(displayText: string): void {
   const layer = document.getElementById("popup-layer") as HTMLElement | null;
   if (!layer) return;
 
   const popup = document.createElement("div");
   popup.classList.add("skill-popup", "user-select");
-  popup.innerHTML = `<span class="skill-popup-text"><b>${playerName}</b>${showVerb ? ' 触发了 ' : ' '}<b>${skillName}</b></span>`;
+  popup.innerHTML = `<span class="skill-popup-text">${displayText}</span>`;
   popup.style.position = "fixed";
   popup.style.top = "80px";
   popup.style.left = "50%";
@@ -3973,8 +3982,6 @@ function spawnPenaltyPopup(playerId: string, delta: number): void {
   mountFloatingPopup(popup, anchor, "right");
   // 5s total animation = 0.4s rise + 4.2s linger + 0.4s fade.
   setTimeout(() => popup.remove(), 5200);
-  const player = players.find((p) => p.id === playerId)
-  showSkillPopup(player?.name || playerId, `被加牌 ${value} 张`, false)
 }
 
 // Mounts a transient floating popup (reaction / +N) into #popup-layer,

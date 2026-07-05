@@ -519,8 +519,15 @@ function broadcastToLobby(
   });
 }
 
-// Broadcast a skill card usage notification
-function broadcastSkillUsed(lobbyId: string, playerId: string, playerName: string, card: Card): void {
+// Broadcast a skill card usage notification. `targetName` is the player
+// who is directly affected (e.g. the skipped player for a skip card).
+function broadcastSkillUsed(
+  lobbyId: string,
+  playerId: string,
+  playerName: string,
+  card: Card,
+  targetName?: string,
+): void {
   const skillNames: Record<string, string> = {
     skip: "跳过",
     reverse: "反转",
@@ -532,11 +539,22 @@ function broadcastSkillUsed(lobbyId: string, playerId: string, playerName: strin
     reshuffle: "重洗",
   };
   const skillName = skillNames[card.type] || card.type;
+  let displayText: string;
+  if (card.type === "skip") {
+    displayText = `${targetName || "下一位玩家"} 被跳过`;
+  } else if (card.type === "reverse") {
+    displayText = "游戏方向反转";
+  } else if (card.type === "reshuffle") {
+    displayText = `${playerName} 重洗了手牌`;
+  } else {
+    displayText = `${playerName} 触发了 ${skillName}`;
+  }
   broadcastToLobby(lobbyId, {
     action: "skill_used",
     playerId,
     playerName,
     skillName,
+    displayText,
   });
 }
 
@@ -1188,7 +1206,9 @@ function handlePlayMultiple(lobbyId: string, playerId: string, cards: Card[]): v
   const cardCount = cards.length;
 
   if (lastCard.type === "skip") {
-    broadcastSkillUsed(lobbyId, player.id, player.name, lastCard);
+    const skippedIdx =
+      (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
+    broadcastSkillUsed(lobbyId, player.id, player.name, lastCard, lobby.players[skippedIdx].name);
     // In chain mode, breaking the chain with skip/reverse must still apply
     // the accumulated penalty to the player who broke it. Without this the
     // chain effect is silently dropped (TODO #3 — "普通牌在部分情况下会使
@@ -1313,7 +1333,9 @@ function handlePlay(lobbyId: string, playerId: string, card: Card): void {
     lobby.game.discardPile.push(card);
 
     if (card.type === "skip") {
-      broadcastSkillUsed(lobbyId, player.id, player.name, card);
+      const skippedIdx =
+        (lobby.game.turn + lobby.game.direction + lobby.players.length) % lobby.players.length;
+      broadcastSkillUsed(lobbyId, player.id, player.name, card, lobby.players[skippedIdx].name);
       if (lobby.game.drawMode !== "direct" && lobby.game.state === LobbyGameState.drawing) {
         const penalty = lobby.game.drawingCount;
         if (penalty > 0) {
@@ -1419,6 +1441,9 @@ function handleDraw(lobbyId: string, playerId: string): void {
     lobby.game.drawingCount = 0;
     if (penalty > 0) {
       player.hand!.push(...drawCardsFromDeck(lobby, lobbyId, penalty));
+      // Broadcast chain break popup — covers the AI-draws-during-chain case
+      // that handlePlay / handlePlayMultiple don't reach.
+      broadcastChainBroken(lobby.id, player.id, player.name, penalty);
     } else {
       player.hand!.push(...drawCardsFromDeck(lobby, lobbyId, 1));
     }
