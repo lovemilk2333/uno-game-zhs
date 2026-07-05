@@ -33,6 +33,43 @@ describe("UNO Client", () => {
     await page.close();
   });
 
+  it("sorts hand cards by color (red, yellow, green, blue, wild)", async () => {
+    const page = await browser.newPage();
+    await page.goto(BASE);
+    await page.waitForSelector("#name");
+
+    const sorted = await page.evaluate(() => {
+      const hand = [
+        { type: "wild4" },
+        { color: "blue", type: "5" },
+        { color: "red", type: "3" },
+        { type: "wild" },
+        { color: "yellow", type: "skip" },
+        { color: "green", type: "1" },
+        { color: "blue", type: "reverse" },
+        { color: "red", type: "0" },
+        { color: "yellow", type: "draw1" },
+        { color: "green", type: "reshuffle" },
+      ];
+      sortHandByColor(hand);
+      return hand.map((c) => c.color || "wild");
+    });
+
+    expect(sorted).toEqual([
+      "red",
+      "red",
+      "yellow",
+      "yellow",
+      "green",
+      "green",
+      "blue",
+      "blue",
+      "wild",
+      "wild",
+    ]);
+    await page.close();
+  });
+
   it("shows (已准备) after player readies and state persists after opponent disconnects", async () => {
     const pageA = await browser.newPage();
     const pageB = await browser.newPage();

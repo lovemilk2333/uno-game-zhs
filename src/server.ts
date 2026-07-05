@@ -888,6 +888,12 @@ function broadcastGameAborted(lobbyId: string, excludePlayerId: string): void {
 // Used on game-over / abort boundaries so a fresh game in the same
 // lobby id starts with no leftover deck, no leftover pause state.
 function resetLobbyGameState(lobby: Lobby): void {
+  // Clear AI timeouts before clearing players
+  for (const player of lobby.players) {
+    if (player.isAI) {
+      clearAITimeout(player.id);
+    }
+  }
   lobby.players = [];
   lobby.chatHistory = [];
   lobby.paused = false;

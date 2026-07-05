@@ -1118,6 +1118,7 @@ function connect(): void {
         turnDeadline = typeof message.turnDeadline === "number" ? message.turnDeadline : null;
         turnTimerPaused = !!message.turnTimerPaused;
         myHand = message.hand || [];
+        sortHandByColor(myHand);
         updatePlayers(players, currentTurn);
         updateDiscardPile(message.discardPile || []);
         updateHand(myHand);
@@ -1188,6 +1189,7 @@ function connect(): void {
         turnDeadline = typeof message.turnDeadline === "number" ? message.turnDeadline : null;
         turnTimerPaused = !!message.turnTimerPaused;
         myHand = message.hand || [];
+        sortHandByColor(myHand);
         syncRoomPauseState(message);
         updatePlayers(players, currentTurn);
         // Now that the new player tiles exist, spawn the +N popups so
@@ -2212,6 +2214,24 @@ function stopReconnectCountdown(): void {
     reconnectCountdownRaf = null;
   }
   reconnectCountdownLastSec.clear();
+}
+
+// Sort a player's hand by color so same-color cards are grouped together,
+// with wild / wild4 cards (which have no `color` property) at the end.
+// The sort is in-place and stable, so cards within the same color group
+// keep their original relative order.
+function sortHandByColor(hand: Card[]): void {
+  const COLOR_ORDER: Record<string, number> = {
+    red: 0,
+    yellow: 1,
+    green: 2,
+    blue: 3,
+  };
+  hand.sort((a, b) => {
+    const aVal = a.color !== undefined ? (COLOR_ORDER[a.color] ?? 99) : 99;
+    const bVal = b.color !== undefined ? (COLOR_ORDER[b.color] ?? 99) : 99;
+    return aVal - bVal;
+  });
 }
 
 function updateHand(hand: Card[]): void {
