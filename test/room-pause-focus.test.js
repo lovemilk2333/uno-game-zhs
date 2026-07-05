@@ -14,11 +14,18 @@
 //      manual scroll cancels the auto-scroll.
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { fork } from "child_process";
-import path from "path";
 import { WebSocket } from "ws";
+import { startServer, stopServer } from "./helpers.js";
 
-const PORT = 3000;
+const PORT = 3030;
+
+beforeAll(async () => {
+  await startServer(PORT);
+}, 20000);
+
+afterAll(() => {
+  stopServer();
+});
 
 async function openClient() {
   return new Promise((resolve, reject) => {

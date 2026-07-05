@@ -4,8 +4,7 @@ export default defineConfig({
   test: {
     globals: true,
     setupFiles: ["./test/setup.js"],
-    fileParallelism: false,
-    sequence: { concurrent: true },
+    fileParallelism: true,
     maxConcurrency: 16,
   },
 });

@@ -1,11 +1,15 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { chromium } from "playwright";
-import { fork } from "child_process";
-import path from "path";
+import { startServer, stopServer } from "./helpers.js";
 
-const BASE = "http://127.0.0.1:3000";
+const PORT = 3060;
+const BASE = `http://127.0.0.1:${PORT}`;
 
 let browser;
+
+beforeAll(async () => {
+  await startServer(PORT);
+}, 20000);
 
 beforeAll(async () => {
   await new Promise((r) => setTimeout(r, 1500));
@@ -14,6 +18,10 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (browser) await browser.close();
+});
+
+afterAll(() => {
+  stopServer();
 });
 
 async function wait(ms) {
@@ -1844,78 +1852,6 @@ describe("UNO Client", () => {
       expect(lobbyVal).not.toBe("LEAKEDLOBBY");
 
       await fresh.close();
-      await ctx.close();
-    },
-  );
-
-  // Regression: a tab that elects a slot previously held by a closed
-  // tab must NOT auto-reconnect with that tab's saved playerId. Without
-  // the slotOrigin guard, the new tab would read `unoPlayerId-N` left
-  // behind by the previous occupant and the server would treat it as
-  // the same user.
-  it(
-    "new tab in a recycled slot does not auto-reconnect as previous user",
-    { timeout: 30000 },
-    async () => {
-      const ctx = await browser.newContext();
-
-      async function openTab() {
-        const p = await ctx.newPage();
-        await p.goto(BASE);
-        await p.waitForSelector("#name");
-        await p.waitForFunction(() => Number(sessionStorage.getItem("unoSlot")) > 0, {
-          timeout: 5000,
-        });
-        return p;
-      }
-
-      // Tab A joins a lobby, gets a server-assigned playerId persisted to
-      // localStorage under its slot.
-      const tabA = await openTab();
-      const slotA = await tabA.evaluate(() => Number(sessionStorage.getItem("unoSlot")));
-      await tabA.fill("#name", "OriginalUser");
-      await tabA.fill("#lobby-id", "recycled-" + Date.now());
-      await tabA.click("#join");
-      await tabA.waitForSelector("#players li");
-      // Wait for unoPlayerId-${slotA} to land in localStorage.
-      await tabA.waitForFunction((slot) => !!localStorage.getItem("unoPlayerId-" + slot), slotA, {
-        timeout: 5000,
-      });
-      const savedId = await tabA.evaluate(
-        (slot) => localStorage.getItem("unoPlayerId-" + slot),
-        slotA,
-      );
-      expect(savedId).toBeTruthy();
-
-      // Close A — the slot is now free. A's localStorage entries persist.
-      await tabA.close();
-      // Slot heartbeats run on a 1.5s cadence; wait past the stale window
-      // (4s) so the next tab's election doesn't see A's last heartbeat.
-      await new Promise((r) => setTimeout(r, 4500));
-
-      // Open tab B in the same browser context. Its election should pick
-      // slot A's slot since it's free, but it must NOT inherit A's
-      // playerId (no auto-reconnect impersonation).
-      const tabB = await openTab();
-      const slotB = await tabB.evaluate(() => Number(sessionStorage.getItem("unoSlot")));
-      expect(slotB).toBe(slotA);
-
-      // B's localStorage for the recycled slot must be cleared of identity
-      // bits — that's what blocks the auto-reconnect.
-      const idAfter = await tabB.evaluate(
-        (slot) => localStorage.getItem("unoPlayerId-" + slot),
-        slotB,
-      );
-      expect(idAfter).toBeNull();
-
-      // The name and lobby fields ARE allowed to pre-fill from the
-      // closed tab's last typed values — those are convenience defaults,
-      // not identity. The contract is: B sees A's typed name (UX), but
-      // does NOT auto-reconnect as A (security).
-      const name = await tabB.locator("#name").inputValue();
-      expect(name).toBe("OriginalUser");
-
-      await tabB.close();
       await ctx.close();
     },
   );
@@ -4509,6 +4445,78 @@ describe("UNO Client", () => {
 });
 
 describe("UNO Client (non-concurrent)", { concurrent: false }, () => {
+  // Regression: a tab that elects a slot previously held by a closed
+  // tab must NOT auto-reconnect with that tab's saved playerId. Without
+  // the slotOrigin guard, the new tab would read `unoPlayerId-N` left
+  // behind by the previous occupant and the server would treat it as
+  // the same user.
+  it(
+    "new tab in a recycled slot does not auto-reconnect as previous user",
+    { timeout: 30000 },
+    async () => {
+      const ctx = await browser.newContext();
+
+      async function openTab() {
+        const p = await ctx.newPage();
+        await p.goto(BASE);
+        await p.waitForSelector("#name");
+        await p.waitForFunction(() => Number(sessionStorage.getItem("unoSlot")) > 0, {
+          timeout: 5000,
+        });
+        return p;
+      }
+
+      // Tab A joins a lobby, gets a server-assigned playerId persisted to
+      // localStorage under its slot.
+      const tabA = await openTab();
+      const slotA = await tabA.evaluate(() => Number(sessionStorage.getItem("unoSlot")));
+      await tabA.fill("#name", "OriginalUser");
+      await tabA.fill("#lobby-id", "recycled-" + Date.now());
+      await tabA.click("#join");
+      await tabA.waitForSelector("#players li");
+      // Wait for unoPlayerId-${slotA} to land in localStorage.
+      await tabA.waitForFunction((slot) => !!localStorage.getItem("unoPlayerId-" + slot), slotA, {
+        timeout: 5000,
+      });
+      const savedId = await tabA.evaluate(
+        (slot) => localStorage.getItem("unoPlayerId-" + slot),
+        slotA,
+      );
+      expect(savedId).toBeTruthy();
+
+      // Close A — the slot is now free. A's localStorage entries persist.
+      await tabA.close();
+      // Slot heartbeats run on a 1.5s cadence; wait past the stale window
+      // (4s) so the next tab's election doesn't see A's last heartbeat.
+      await new Promise((r) => setTimeout(r, 4500));
+
+      // Open tab B in the same browser context. Its election should pick
+      // slot A's slot since it's free, but it must NOT inherit A's
+      // playerId (no auto-reconnect impersonation).
+      const tabB = await openTab();
+      const slotB = await tabB.evaluate(() => Number(sessionStorage.getItem("unoSlot")));
+      expect(slotB).toBe(slotA);
+
+      // B's localStorage for the recycled slot must be cleared of identity
+      // bits — that's what blocks the auto-reconnect.
+      const idAfter = await tabB.evaluate(
+        (slot) => localStorage.getItem("unoPlayerId-" + slot),
+        slotB,
+      );
+      expect(idAfter).toBeNull();
+
+      // The name and lobby fields ARE allowed to pre-fill from the
+      // closed tab's last typed values — those are convenience defaults,
+      // not identity. The contract is: B sees A's typed name (UX), but
+      // does NOT auto-reconnect as A (security).
+      const name = await tabB.locator("#name").inputValue();
+      expect(name).toBe("OriginalUser");
+
+      await tabB.close();
+      await ctx.close();
+    },
+  );
+
   it(
     "parallel-booted restored tabs each keep their own (slot, name)",
     { timeout: 30000 },

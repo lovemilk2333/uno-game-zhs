@@ -9,12 +9,16 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { chromium } from "playwright";
-import { fork } from "child_process";
-import path from "path";
+import { startServer, stopServer } from "./helpers.js";
 
-const BASE = "http://127.0.0.1:3000";
+const PORT = 3050;
+const BASE = `http://127.0.0.1:${PORT}`;
 
 let browser;
+
+beforeAll(async () => {
+  await startServer(PORT);
+}, 20000);
 
 beforeAll(async () => {
   browser = await chromium.launch({ headless: true });
@@ -22,6 +26,10 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (browser) await browser.close();
+});
+
+afterAll(() => {
+  stopServer();
 });
 
 // Open a tab, wait until its boot has either claimed a slot OR finished

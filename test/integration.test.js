@@ -8,11 +8,18 @@
 // what the forked server below is started with.
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { fork } from "child_process";
-import path from "path";
 import { WebSocket } from "ws";
+import { startServer, stopServer } from "./helpers.js";
 
-const PORT = 3000;
+const PORT = 3010;
+
+beforeAll(async () => {
+  await startServer(PORT);
+}, 20000);
+
+afterAll(() => {
+  stopServer();
+});
 
 // Open a client and return a small awaitable wrapper over the WebSocket so
 // tests can `await c.next('update')` for the next message of a given action,
