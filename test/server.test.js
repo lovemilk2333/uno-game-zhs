@@ -57,6 +57,10 @@ describe("UNO Server", { concurrent: false }, () => {
           turn: 0,
           direction: 1,
           started: false,
+          state: 0,
+          drawingCount: 0,
+          drawMode: "chain",
+          disabledActionCards: [],
         },
       };
     }

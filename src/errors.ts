@@ -23,6 +23,7 @@ export const ERR: Record<string, ErrorDef> = {
   LOBBY_STARTED_JOIN: { message: "大厅已开始对局, 请使用其他名称" },
   NAME_DUPLICATE: { message: "该大厅中已存在同名玩家，请选择其他名称", needRefresh: false },
   INVALID_PLAYER_NAME: { message: "玩家名称无效", needRefresh: false },
+  INVALID_PAYLOAD: { message: "无效的消息内容" },
 } as const;
 
 export type ErrorCode = keyof typeof ERR;

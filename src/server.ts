@@ -85,6 +85,8 @@ interface Lobby {
     state: LobbyGameState;
     drawingCount: number;
     drawMode: "chain" | "direct";
+    // Card types that the creator has disabled for this lobby.
+    disabledActionCards: string[];
   };
 }
 
@@ -495,6 +497,7 @@ function createLobby(lobbyId: string): Lobby {
       state: LobbyGameState.normal,
       drawingCount: 0,
       drawMode: "chain",
+      disabledActionCards: [],
     },
   };
 }
@@ -614,6 +617,7 @@ function broadcastPlayers(lobbyId: string): void {
         turn: lobby.game.turn,
         lobbyId: lobbyId,
         drawMode: lobby.game.drawMode,
+        disabledActionCards: lobby.game.disabledActionCards,
         turnDeadline: lobby.game.started ? getTurnDeadline(lobbyId) : null,
         turnTimerPaused: lobby.game.started ? isTurnTimerPaused(lobbyId) : false,
         spectator: meta.isSpectator || false,
@@ -731,12 +735,15 @@ function createDeck(lobbyId: string): void {
   const lobby = lobbies.get(lobbyId);
   if (!lobby) return;
 
+  const disabled = new Set(lobby.game.disabledActionCards || []);
+
   const colors = ["red", "yellow", "green", "blue"];
   const types = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "skip", "reverse", "draw1", "draw2", "draw3", "reshuffle"];
   const wildTypes = ["wild", "wild4"];
 
   for (const color of colors) {
     for (const type of types) {
+      if (disabled.has(type)) continue;
       lobby.game.deck.push({ color, type });
       if (type !== "0" && type !== "reshuffle") {
         lobby.game.deck.push({ color, type });
@@ -746,6 +753,7 @@ function createDeck(lobbyId: string): void {
 
   for (let i = 0; i < 4; i++) {
     for (const type of wildTypes) {
+      if (disabled.has(type)) continue;
       lobby.game.deck.push({ type });
     }
   }
@@ -761,12 +769,25 @@ function shuffleDeck(lobbyId: string): void {
   }
 }
 
-function generateRandomCard(): Card {
+function generateRandomCard(disabled?: Set<string>): Card {
   const colors = ["red", "yellow", "green", "blue"];
-  const types = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "skip", "reverse", "draw1", "draw2", "draw3", "reshuffle"];
+  const allTypes = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "skip", "reverse", "draw1", "draw2", "draw3", "reshuffle"];
+  // Filter to enabled types (number cards are always included).
+  const types = allTypes.filter((t) => !disabled || !disabled.has(t));
+  // Only keep wilds that aren't disabled.
+  const hasWild = !disabled || !disabled.has("wild");
+  const hasWild4 = !disabled || !disabled.has("wild4");
+
   const r = Math.random();
-  if (r < 0.05) return { type: "wild4" };
-  if (r < 0.1) return { type: "wild" };
+  if (r < 0.05 && hasWild4) return { type: "wild4" };
+  if (r < 0.1 && hasWild) return { type: "wild" };
+  if (types.length === 0) {
+    // All action cards disabled — fall back to a random number card.
+    return {
+      color: colors[Math.floor(Math.random() * colors.length)],
+      type: `0`,
+    };
+  }
   return {
     color: colors[Math.floor(Math.random() * colors.length)],
     type: types[Math.floor(Math.random() * types.length)],
@@ -791,7 +812,8 @@ function drawCardsFromDeck(lobby: Lobby, lobbyId: string, count: number): Card[]
         }
       }
     } else {
-      card = generateRandomCard();
+      const disabled = new Set(lobby.game.disabledActionCards || []);
+      card = generateRandomCard(disabled);
     }
     if (card) drawn.push(card);
   }
@@ -1895,6 +1917,33 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
             return;
           }
           lobby.game.drawMode = message.mode === "direct" ? "direct" : "chain";
+          broadcastPlayers(metadata.lobbyId!);
+          return;
+        }
+
+        case "set_enabled_cards": {
+          const lobby = lobbies.get(metadata.lobbyId!);
+          if (!lobby) {
+            ws.send(JSON.stringify(errorResponse("NOT_IN_LOBBY")));
+            return;
+          }
+          const creator = lobby.players.find((p) => p.id === metadata.id);
+          if (!creator || !creator.isCreator) {
+            ws.send(JSON.stringify(errorResponse("CREATOR_ONLY")));
+            return;
+          }
+          if (lobby.game.started) {
+            ws.send(JSON.stringify(errorResponse("GAME_ALREADY_STARTED")));
+            return;
+          }
+          // message.cards is an array of card types to disable (e.g. ["skip", "wild4"])
+          if (!Array.isArray(message.cards)) {
+            ws.send(JSON.stringify(errorResponse("INVALID_PAYLOAD")));
+            return;
+          }
+          lobby.game.disabledActionCards = message.cards.filter(
+            (t: unknown) => typeof t === "string",
+          );
           broadcastPlayers(metadata.lobbyId!);
           return;
         }

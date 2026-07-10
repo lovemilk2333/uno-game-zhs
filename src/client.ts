@@ -86,6 +86,8 @@ interface ServerMessage {
   displayText?: string;
   nName?: string;
   penalty?: number;
+  // Lobby settings fields.
+  disabledActionCards?: string[];
 }
 
 // Room-level pause state. Mirrored from the server's `paused` flag on
@@ -587,6 +589,7 @@ let selectedCards: SavedSelection[] = [];
 let isSelectingMultiple = false;
 let myHand: Card[] = [];
 let myLobbyId: string | null = null;
+let disabledActionCards: string[] = [];
 let isSpectating = false;
 let gameState = 0;
 let drawingChain = 0;
@@ -1083,6 +1086,10 @@ function connect(): void {
           });
           updateGameStatusPills();
           updateDevStateInfo();
+        }
+        // Sync action cards toggles.
+        if (Array.isArray(message.disabledActionCards)) {
+          syncActionCardToggles(message.disabledActionCards);
         }
         break;
 
@@ -2000,6 +2007,7 @@ function resetGameState(): void {
     readyButton.style.display = "none";
     if (inviteAIBtn) inviteAIBtn.style.display = "none";
     document.getElementById("draw-mode-area")!.style.display = "none";
+    document.getElementById("action-cards-area")!.style.display = "none";
 
     // Clear players list
     playersList.innerHTML = "";
@@ -2172,6 +2180,13 @@ function updatePlayers(newPlayers: Player[], turn: number): void {
   const drawModeArea = document.getElementById("draw-mode-area")!;
   drawModeArea.style.display = "flex";
   drawModeArea.classList.toggle("readonly", !(me && me.isCreator));
+  // Show the action-cards area to everyone in the lobby — same pattern
+  // as the draw-mode toggle.
+  const actionCardsArea = document.getElementById("action-cards-area")!;
+  actionCardsArea.style.display = "block";
+  actionCardsArea.classList.toggle("readonly", !(me && me.isCreator));
+  // Sync toggles on every players frame so late-joiners see the correct state.
+  syncActionCardToggles(disabledActionCards);
   updateReadyButton();
   // Pause buttons: creator gets the toggle, non-creators get a
   // request button. Only show them once a game is in flight; pause
@@ -3098,6 +3113,51 @@ document.addEventListener("DOMContentLoaded", () => {
       sendMessage({ action: "set_draw_mode", mode });
     });
   });
+
+  // ── Action cards toggle (lobby) ─────────────────────
+  const CARD_TOGGLE_DEFS = [
+    { type: "skip", label: "跳过" },
+    { type: "reverse", label: "反转" },
+    { type: "draw1", label: "+1" },
+    { type: "draw2", label: "+2" },
+    { type: "draw3", label: "+3" },
+    { type: "reshuffle", label: "重洗" },
+    { type: "wild", label: "变色" },
+    { type: "wild4", label: "+4" },
+  ];
+  /** Set all toggle chips to match `disabled` (the array of disabled types). */
+  window.syncActionCardToggles = function(disabled: string[]): void {
+    disabledActionCards = disabled;
+    const disabledSet = new Set(disabled);
+    const box = document.getElementById("action-cards-toggle-box");
+    if (!box) return;
+    // On first call the box is empty — populate it.
+    if (!box.children.length) {
+      for (let ci = 0; ci < CARD_TOGGLE_DEFS.length; ci++) {
+        const def = CARD_TOGGLE_DEFS[ci];
+        const chip = document.createElement("span");
+        chip.className = "card-toggle";
+        chip.dataset.cardType = def.type;
+        chip.textContent = def.label;
+        chip.addEventListener("click", () => {
+          const area = document.getElementById("action-cards-area");
+          if (area && area.classList.contains("readonly")) return;
+          const idx = disabledActionCards.indexOf(def.type);
+          const next = idx >= 0
+            ? disabledActionCards.filter((t) => t !== def.type)
+            : [...disabledActionCards, def.type];
+          sendMessage({ action: "set_enabled_cards", cards: next });
+        });
+        box.appendChild(chip);
+      }
+    }
+    for (let ci = 0; ci < box.children.length; ci++) {
+      const chip = box.children[ci] as HTMLElement;
+      const t = chip.dataset.cardType!;
+      chip.classList.toggle("active", !disabledSet.has(t));
+    }
+  };
+  const syncActionCardToggles = window.syncActionCardToggles;
 
   // Draw mode info → opens rules and highlights the section. Also
   // remembers the user's intent so that future opens of the rules
