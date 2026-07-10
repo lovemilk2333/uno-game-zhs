@@ -3164,6 +3164,14 @@ document.addEventListener("DOMContentLoaded", () => {
             ? disabledActionCards.filter((t) => t !== def.type)
             : [...disabledActionCards, def.type];
           sendMessage({ action: "set_enabled_cards", cards: next });
+          // Optimistically update local state + tooltip text so the
+          // hover tooltip reflects the change immediately instead of
+          // waiting for the server broadcast round-trip.
+          window.syncActionCardToggles(next);
+          const tip = document.getElementById("tooltip");
+          if (tip && tip.classList.contains("show")) {
+            tip.textContent = chip.getAttribute("data-tooltip") || tip.textContent;
+          }
         });
         box.appendChild(chip);
       }
