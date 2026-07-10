@@ -3139,6 +3139,7 @@ document.addEventListener("DOMContentLoaded", () => {
         chip.className = "card-toggle";
         chip.dataset.cardType = def.type;
         chip.textContent = def.label;
+        chip.title = `${def.label}（已启用）`;
         chip.addEventListener("click", () => {
           const area = document.getElementById("action-cards-area");
           if (area && area.classList.contains("readonly")) return;
@@ -3154,7 +3155,12 @@ document.addEventListener("DOMContentLoaded", () => {
     for (let ci = 0; ci < box.children.length; ci++) {
       const chip = box.children[ci] as HTMLElement;
       const t = chip.dataset.cardType!;
-      chip.classList.toggle("active", !disabledSet.has(t));
+      const enabled = !disabledSet.has(t);
+      chip.classList.toggle("active", enabled);
+      // Use the card's original label for the tooltip.
+      const def = CARD_TOGGLE_DEFS.find((d) => d.type === t);
+      const label = def ? def.label : t;
+      chip.title = `${label}（${enabled ? "已启用" : "已禁用"}）`;
     }
   };
   const syncActionCardToggles = window.syncActionCardToggles;
