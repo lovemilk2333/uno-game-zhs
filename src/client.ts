@@ -1713,6 +1713,22 @@ function updateGameStatusPills(): void {
   } else {
     chainEl.classList.add("hidden");
   }
+
+  // Disabled-cards pill — shown when the creator has disabled any action
+  // card types for this lobby.
+  const disabledEl = document.getElementById("game-status-disabled-cards") as HTMLSpanElement | null;
+  if (disabledEl && disabledActionCards.length > 0) {
+    const labels: Record<string, string> = {
+      skip: "跳过", reverse: "反转", draw1: "+1", draw2: "+2",
+      draw3: "+3", reshuffle: "重洗", wild: "变色", wild4: "+4",
+    };
+    const names = disabledActionCards.map((t) => labels[t] || t).join("、");
+    disabledEl.classList.remove("hidden");
+    disabledEl.textContent = `已禁用 ${disabledActionCards.length} 种`;
+    disabledEl.setAttribute("data-tooltip", `禁用的功能牌：${names}`);
+  } else if (disabledEl) {
+    disabledEl.classList.add("hidden");
+  }
 }
 
 // When the page is scrolled far enough that the turn-indicator and the
@@ -3139,7 +3155,7 @@ document.addEventListener("DOMContentLoaded", () => {
         chip.className = "card-toggle";
         chip.dataset.cardType = def.type;
         chip.textContent = def.label;
-        chip.title = `${def.label}（已启用）`;
+        chip.setAttribute("data-tooltip", `${def.label}（已启用）`);
         chip.addEventListener("click", () => {
           const area = document.getElementById("action-cards-area");
           if (area && area.classList.contains("readonly")) return;
@@ -3160,7 +3176,7 @@ document.addEventListener("DOMContentLoaded", () => {
       // Use the card's original label for the tooltip.
       const def = CARD_TOGGLE_DEFS.find((d) => d.type === t);
       const label = def ? def.label : t;
-      chip.title = `${label}（${enabled ? "已启用" : "已禁用"}）`;
+      chip.setAttribute("data-tooltip", `${label}（${enabled ? "已启用" : "已禁用"}）`);
     }
   };
   const syncActionCardToggles = window.syncActionCardToggles;
