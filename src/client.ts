@@ -1720,20 +1720,35 @@ function updateGameStatusPills(): void {
     chainEl.classList.add("hidden");
   }
 
-  // Disabled-cards pill — shown when the creator has disabled any action
-  // card types for this lobby.
-  const disabledEl = document.getElementById("game-status-disabled-cards") as HTMLSpanElement | null;
-  if (disabledEl && disabledActionCards.length > 0) {
-    const labels: Record<string, string> = {
-      skip: "跳过", reverse: "反转", draw1: "+1", draw2: "+2",
-      draw3: "+3", reshuffle: "重洗", wild: "变色", wild4: "+4",
-    };
-    const names = disabledActionCards.map((t) => labels[t] || t).join("、");
-    disabledEl.classList.remove("hidden");
-    disabledEl.textContent = `已禁用 ${disabledActionCards.length} 种`;
-    disabledEl.setAttribute("data-tooltip", `禁用的功能牌：${names}`);
-  } else if (disabledEl) {
-    disabledEl.classList.add("hidden");
+  // In-game action-cards bar — mirrors the lobby toggles so all players
+  // can see which card types are enabled / disabled during the game.
+  renderGameActionCardsBar();
+}
+
+/** Render the read-only action-cards bar inside the game UI. */
+function renderGameActionCardsBar(): void {
+  const bar = document.getElementById("game-action-cards-bar");
+  if (!bar) return;
+  if (gameDiv.style.display === "none") {
+    bar.style.display = "none";
+    return;
+  }
+  // Reuse the same toggle-defs and state as the lobby toggles.
+  const labels: Record<string, string> = {
+    skip: "跳过", reverse: "反转", draw1: "+1", draw2: "+2",
+    draw3: "+3", reshuffle: "重洗", wild: "变色", wild4: "+4",
+  };
+  const disabledSet = new Set(disabledActionCards);
+  bar.style.display = "";
+  bar.innerHTML = "";
+  for (const [type, label] of Object.entries(labels)) {
+    const chip = document.createElement("span");
+    chip.className = "card-toggle";
+    chip.textContent = label;
+    const enabled = !disabledSet.has(type);
+    chip.classList.toggle("active", enabled);
+    chip.setAttribute("data-tooltip", `${label}（${enabled ? "已启用" : "已禁用"}）`);
+    bar.appendChild(chip);
   }
 }
 
