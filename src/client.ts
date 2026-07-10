@@ -1163,6 +1163,9 @@ function connect(): void {
         if (Array.isArray(message.chatHistory)) {
           restoreReactionHistory(message.chatHistory);
         }
+        if (Array.isArray(message.disabledActionCards)) {
+          syncActionCardToggles(message.disabledActionCards);
+        }
         break;
 
       case "update":
@@ -1211,6 +1214,9 @@ function connect(): void {
         updateHand(myHand);
         applyCardLayout();
         updateTurnIndicator();
+        if (Array.isArray(message.disabledActionCards)) {
+          syncActionCardToggles(message.disabledActionCards);
+        }
         break;
 
       case "win":

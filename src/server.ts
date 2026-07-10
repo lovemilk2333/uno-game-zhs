@@ -883,6 +883,7 @@ function startGame(lobbyId: string): void {
         pausedBy: lobby.pausedBy,
         pauseReason: lobby.pauseReason,
         pauseRequests: Array.from(lobby.pauseRequests),
+        disabledActionCards: lobby.game.disabledActionCards,
       };
       client.send(JSON.stringify(message));
     }
@@ -1572,6 +1573,7 @@ function broadcastGameUpdate(lobbyId: string): void {
         pausedBy: lobby.pausedBy,
         pauseReason: lobby.pauseReason,
         pauseRequests: Array.from(lobby.pauseRequests),
+        disabledActionCards: lobby.game.disabledActionCards,
       };
 
       client.send(JSON.stringify(message));
