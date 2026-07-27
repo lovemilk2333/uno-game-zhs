@@ -579,8 +579,8 @@ function getErrorDef(key: string): ErrorDef | undefined {
   return errorDefs ? errorDefs[key] : undefined;
 }
 
-let myId: string | null = null;
 let ws: WebSocket | null = null;
+let myId: string | null = null;
 let currentTurn = -1;
 let gameDirection = 1;
 let players: Player[] = [];
@@ -916,6 +916,12 @@ function connect(): void {
   const newWs = new WebSocket(wsUrl.toString());
   currentWs = newWs;
   ws = newWs;
+
+  // windows.ws = ws
+  if (typeof globalThis === 'undefined') {
+    window.globalThis = window
+  }
+  globalThis.ws = ws
 
   newWs.onopen = () => {
     if (newWs !== currentWs) return;

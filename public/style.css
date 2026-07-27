@@ -3190,3 +3190,10 @@ footer a:hover {
 .reaction-history-content img {
   vertical-align: middle;
 }
+
+#game-action-cards-bar {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+}

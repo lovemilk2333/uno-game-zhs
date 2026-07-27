@@ -24,6 +24,7 @@ export const ERR: Record<string, ErrorDef> = {
   NAME_DUPLICATE: { message: "该大厅中已存在同名玩家，请选择其他名称", needRefresh: false },
   INVALID_PLAYER_NAME: { message: "玩家名称无效", needRefresh: false },
   INVALID_PAYLOAD: { message: "无效的消息内容" },
+  INVALID_CARD: { message: "无效的卡牌内容" },
 } as const;
 
 export type ErrorCode = keyof typeof ERR;

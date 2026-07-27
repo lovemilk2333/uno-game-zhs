@@ -152,6 +152,21 @@ function safeResolve(...segments: string[]): string | null {
   return null;
 }
 
+function isValidCard(card: Card | undefined) {
+  if (typeof card === 'undefined' || !card) {
+    return false
+  }
+
+  if (typeof card?.type !== 'string') {
+    return false
+  }
+  if (typeof card?.color !== 'string') {
+    return false
+  }
+
+  return true
+}
+
 // ── Input validation ────────────────────────────────────
 // Lobby IDs are used as Map keys and broadcast to clients; restrict the
 // character set so they can't be abused for memory growth, log injection or
@@ -2139,6 +2154,12 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
             ws.send(JSON.stringify(errorResponse("ROOM_PAUSED")));
             return;
           }
+          
+          if (!isValidCard(message.card)) {
+            ws.send(JSON.stringify(errorResponse("INVALID_CARD")));
+            return
+          }
+
           handlePlay(metadata.lobbyId!, metadata.id, message.card!);
           return;
 
