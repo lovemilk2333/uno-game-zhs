@@ -439,7 +439,12 @@ function tickFocusAutoPause(): void {
     // AI is always considered "focused" — a paused-game decision should
     // not hinge on an AI's lack of a tab.
     const humans = lobby.players.filter((p) => !p.isAI);
-    if (humans.length === 0) continue;
+    // A single human (single-player + AI) controls their own pause via
+    // the pause button — auto-pausing on THEIR focus loss would pop the
+    // "失焦自动暂停" overlay on every alt-tab / DevTools click. The
+    // feature exists to protect a majority of humans stepping away
+    // together, which needs at least 2 humans.
+    if (humans.length < 2) continue;
     const unfocused = humans.filter(
       (p) => p._focused === false && typeof p._blurredAt === "number" && now - p._blurredAt >= FOCUS_AUTO_PAUSE_MS,
     );

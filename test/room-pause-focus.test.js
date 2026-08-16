@@ -391,6 +391,32 @@ describe("TODO #3 — room pause (creator direct + majority request)", () => {
     b.close();
     c.close();
   }, 15000);
+
+  it("single human + AI: the solo player's own focus loss does NOT auto-pause", async () => {
+    // 单人+AI regression: with only one human, any alt-tab / DevTools
+    // click would blur the tab and trip the focus auto-pause (threshold
+    // ceil(2/3 * 1) = 1), popping the "失焦自动暂停" overlay constantly.
+    // The solo player controls pause via the manual button instead.
+    const lobbyId = "pause-solo-" + Date.now();
+    const a = await openClient();
+    await a.next("init");
+    a.send({ action: "join", name: "Solo", lobbyId });
+    await a.next("players");
+    a.send({ action: "add_ai" });
+    await a.next("players");
+    a.send({ action: "ready" });
+    await a.next("players");
+    await a.next("start");
+    // Blur the only human for longer than FOCUS_AUTO_PAUSE_MS + poll
+    // margin. No room_paused may arrive.
+    a.send({ action: "pause_focus_update", focused: false });
+    await expect(a.next("room_paused", 7500)).rejects.toThrow();
+    // Manual creator pause still works.
+    a.send({ action: "pause_direct" });
+    const paused = await a.next("room_paused");
+    expect(paused.reason).toBe("creator_pause");
+    a.close();
+  }, 15000);
 });
 
 describe("TODO #2 — chain draw card auto-prompt (server-side enforcement)", () => {
