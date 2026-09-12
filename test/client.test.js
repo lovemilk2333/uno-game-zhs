@@ -2212,6 +2212,156 @@ describe("UNO Client", () => {
     await pageB.close();
   });
 
+  // Regression: the countdown ticker must be a SINGLE rAF chain.
+  //
+  // `startTurnCountdown` ran on every state frame and `tickTurnCountdown`
+  // re-armed the rAF itself, so each frame armed two more callbacks
+  // without cancelling the previous ones. The parallel loops multiplied
+  // per frame (measured: ~1250 rAF callbacks/s after the first turn
+  // change, ~3700/s four frames later, growing without bound), saturating
+  // the main thread — on slower / backgrounded clients (the non-host
+  // waiting on the active player) the countdown then stopped repainting
+  // and sat visibly stuck on "30s".
+  it("turn timer keeps a single rAF loop across state frames", { timeout: 60000 }, async () => {
+    const pageA = await browser.newPage();
+    const pageB = await browser.newPage();
+    await pageA.addInitScript(() => {
+      window.__rafArms = 0;
+      const orig = window.requestAnimationFrame.bind(window);
+      window.requestAnimationFrame = (cb) => {
+        window.__rafArms++;
+        return orig(cb);
+      };
+    });
+    await pageA.goto(BASE);
+    await pageB.goto(BASE);
+
+    const lobbyId = "timer-chain-" + Date.now();
+    await pageA.fill("#name", "Alice");
+    await pageA.fill("#lobby-id", lobbyId);
+    await pageA.click("#join");
+    await pageA.waitForSelector("#players li");
+    await pageB.fill("#name", "Bob");
+    await pageB.fill("#lobby-id", lobbyId);
+    await pageB.click("#join");
+    await pageA.waitForFunction(() => document.querySelectorAll("#players li").length === 2);
+    await pageA.click("#ready");
+    await pageB.click("#ready");
+    await pageA.waitForFunction(
+      () => {
+        const el = document.getElementById("game");
+        return el && el.style.display !== "none";
+      },
+      null,
+      { timeout: 10000 },
+    );
+    // Wait until the countdown is live.
+    await pageA.waitForFunction(
+      () => /^\d+s$/.test((document.getElementById("turn-timer")?.textContent || "").trim()),
+      null,
+      { timeout: 5000 },
+    );
+
+    const armsIn1s = async () => {
+      const before = await pageA.evaluate(() => window.__rafArms);
+      await pageA.waitForTimeout(1000);
+      const after = await pageA.evaluate(() => window.__rafArms);
+      return after - before;
+    };
+
+    const baseline = await armsIn1s();
+
+    // Each of these broadcasts a state frame; the old code added another
+    // parallel rAF chain per frame.
+    for (let i = 0; i < 4; i++) {
+      await pageA.evaluate(() => window.sendMessage({ action: "dev_skip" }));
+      await pageA.waitForTimeout(400);
+    }
+    const afterFrames = await armsIn1s();
+
+    // A single chain arms ~once per frame; the loop count must not grow
+    // with the number of state frames. Allow generous headroom for
+    // background throttling / slower CI machines.
+    expect(afterFrames).toBeLessThanOrEqual(baseline * 2 + 60);
+
+    await pageA.close();
+    await pageB.close();
+  });
+
+  // Regression: the 250ms interval is the documented backstop for a
+  // stalled rAF (hidden / occluded tabs, DevTools), so it must be armed
+  // independently of the rAF state. The old code returned early from
+  // `startTurnCountdown` whenever a rAF was already pending, so the
+  // backstop could be skipped — and since every stop path (AI turns,
+  // room pause, game end) clears it, a client whose rAF later stalled
+  // had NO ticker at all: the countdown froze on the "30s" painted when
+  // the turn was freshly minted — exactly the reported symptom.
+  it("turn timer keeps ticking when rAF is stalled", { timeout: 60000 }, async () => {
+    const page = await browser.newPage();
+    await page.addInitScript(() => {
+      const orig = window.requestAnimationFrame.bind(window);
+      // When __stallRaf is set, callbacks are never invoked — the same
+      // effect a hidden / discarded rAF has on the page.
+      window.__stallRaf = false;
+      window.requestAnimationFrame = (cb) => {
+        if (window.__stallRaf) return 999999;
+        return orig(cb);
+      };
+    });
+    await page.goto(BASE);
+
+    await page.fill("#name", "Solo");
+    await page.fill("#lobby-id", "timer-stall-" + Date.now());
+    await page.click("#join");
+    await page.waitForSelector("#players li");
+    await page.click("#invite-ai");
+    await page.waitForTimeout(400);
+    await page.click("#ready");
+    await page.waitForFunction(
+      () => {
+        const el = document.getElementById("game");
+        return el && el.style.display !== "none";
+      },
+      null,
+      { timeout: 10000 },
+    );
+    await page.waitForFunction(
+      () => /^\d+s$/.test((document.getElementById("turn-timer")?.textContent || "").trim()),
+      null,
+      { timeout: 5000 },
+    );
+
+    // Stall the rAF, then hand the turn to the AI (drawing advances the
+    // turn) so the turn-timer is stopped and restarted — the path where
+    // the backstop used to be dropped.
+    await page.evaluate(() => {
+      window.__stallRaf = true;
+    });
+    await page.evaluate(() => document.getElementById("draw-card")?.click());
+    // Let the AI take its turn and hand the turn back to the human.
+    // NOTE: poll on a timer, not rAF — `waitForFunction`'s default rAF
+    // polling would never run while we're deliberately stalling rAF.
+    await page.waitForFunction(
+      () => document.getElementById("turn-label")?.textContent?.includes("YOU"),
+      null,
+      { timeout: 20000, polling: 100 },
+    );
+
+    const first = await page.$eval("#turn-timer", (el) => el.textContent);
+    const firstSec = Number(/(\d+)s/.exec(first)[1]);
+    let secondSec = firstSec;
+    for (let i = 0; i < 30 && secondSec >= firstSec; i++) {
+      await page.waitForTimeout(250);
+      const m = /(\d+)s/.exec(await page.$eval("#turn-timer", (el) => el.textContent));
+      if (m) secondSec = Number(m[1]);
+    }
+    // With rAF stalled the interval backstop is the only ticker — the
+    // display must still advance.
+    expect(secondSec).toBeLessThan(firstSec);
+
+    await page.close();
+  });
+
   // Task #6 follow-up: pressing a digit key highlights the corresponding
   // card; the cards also visibly show the matching digit badge so users
   // know which key plays which card.

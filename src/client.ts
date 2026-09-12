@@ -694,18 +694,24 @@ function setTurnTimerText(text: string): void {
   const el = getTurnTimerEl();
   if (el.textContent !== text) el.textContent = text;
 }
+// Arm (or re-arm) the ONE rAF ticker. Any previously-armed callback is
+// cancelled first: `tickTurnCountdown` re-arms itself every frame AND
+// `startTurnCountdown` runs on every state frame, so without the cancel
+// each frame spawned another parallel rAF chain. Chains then multiplied
+// per frame and `stopTurnCountdown` could only cancel the newest one —
+// the survivors kept overwriting `turnTimerRaf` with a fresh id, which
+// made `startTurnCountdown` early-return forever and never re-arm the
+// interval below.
+function armTurnTimerRaf(): void {
+  if (turnTimerRaf !== null) window.cancelAnimationFrame(turnTimerRaf);
+  turnTimerRaf = window.requestAnimationFrame(tickTurnCountdown);
+}
+
 function tickTurnCountdown(): void {
   if (turnDeadline === null) {
     setTurnTimerText("");
     getTurnTimerEl().classList.remove("low", "critical", "paused");
-    if (turnTimerRaf !== null) {
-      window.cancelAnimationFrame(turnTimerRaf);
-      turnTimerRaf = null;
-    }
-    if (turnTimerInterval !== null) {
-      window.clearInterval(turnTimerInterval);
-      turnTimerInterval = null;
-    }
+    stopTurnCountdown();
     return;
   }
   // Dev pause: server clamped the timer; freeze the displayed value so
@@ -738,16 +744,22 @@ function tickTurnCountdown(): void {
   el.classList.remove("paused");
   el.classList.toggle("critical", seconds <= 5);
   el.classList.toggle("low", seconds > 5 && seconds <= 10);
-  turnTimerRaf = window.requestAnimationFrame(tickTurnCountdown);
+  armTurnTimerRaf();
 }
 function startTurnCountdown(): void {
-  if (turnTimerRaf !== null) return;
-  turnTimerRaf = window.requestAnimationFrame(tickTurnCountdown);
+  armTurnTimerRaf();
   // Belt-and-suspenders: a 1s interval guarantees the display ticks
   // even if rAF gets stalled (some Chromium states let rAF pause for
   // hidden / inactive tabs OR throttle to extreme rates). The
   // interval is cheap — it just calls tick which short-circuits if
   // turnDeadline is null.
+  //
+  // Armed INDEPENDENTLY of the rAF: it is the ticker that survives a
+  // stalled rAF, so it must never be skipped because a rAF happens to
+  // be pending (the old early-return here did exactly that, and since
+  // the interval is cleared on every stop path — AI turns, room pause,
+  // game end — a stalled-rAF tab could end up with no ticker at all and
+  // a countdown frozen on the freshly-minted "30s").
   if (turnTimerInterval === null) {
     turnTimerInterval = window.setInterval(() => {
       if (turnDeadline !== null) tickTurnCountdown();
